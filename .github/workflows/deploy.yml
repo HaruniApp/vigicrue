@@ -17,6 +17,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             cd /opt/vigicrue
+            git remote set-url origin https://github.com/HaruniApp/vigicrue.git
             git pull origin main
             npm -C backend install --production
             npm -C frontend install
