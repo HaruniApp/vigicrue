@@ -7,12 +7,14 @@ function Tooltip(props) {
   const idx = () => props.cursor.idx;
   return (
     <div style={{
-      background: "white",
-      padding: "8px 12px",
-      border: "1px solid #ccc",
-      "border-radius": "4px",
+      background: "rgba(255,255,255,0.92)",
+      "backdrop-filter": "blur(8px)",
+      "-webkit-backdrop-filter": "blur(8px)",
+      padding: "10px 14px",
+      border: "none",
+      "border-radius": "12px",
       "font-size": "13px",
-      "box-shadow": "0 2px 6px rgba(0,0,0,0.15)",
+      "box-shadow": "0 4px 20px rgba(0,0,0,0.1)",
     }}>
       <div style={{ "margin-bottom": "4px", "font-weight": "bold" }}>
         {new Date(props.cursor.xValue * 1000).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })}
@@ -158,15 +160,15 @@ export default function HydroChart(props) {
     {},
     {
       label: "Hauteur (m)",
-      stroke: "#0d9488",
-      width: 2,
+      stroke: "#3b82f6",
+      width: 2.5,
       scale: "H",
       value: (u, v) => v == null ? "--" : v.toFixed(2),
     },
     {
       label: "Debit (m\u00b3/s)",
-      stroke: "#d97706",
-      width: 2,
+      stroke: "#f97316",
+      width: 2.5,
       scale: "Q",
     },
   ];
@@ -208,8 +210,15 @@ export default function HydroChart(props) {
 
   const tzDate = ts => uPlot.tzDate(new Date(ts * 1000), 'Europe/Paris');
 
+  const axisFont = '12px "Inter", -apple-system, BlinkMacSystemFont, sans-serif';
+  const axisLabelFont = '12px "Inter", -apple-system, BlinkMacSystemFont, sans-serif';
+
   const axes = [
     {
+      font: axisFont,
+      stroke: "#86868b",
+      ticks: { stroke: "#e5e5ea", width: 1 },
+      grid: { stroke: "#f0f0f2", width: 1 },
       values: [
         [3600*24*365, "{YYYY}",     null,                          null, null,               null, null, null, 1],
         [3600*24*28,  "{MMM}",      "\n{YYYY}",                    null, null,               null, null, null, 1],
@@ -223,15 +232,21 @@ export default function HydroChart(props) {
       scale: "H",
       side: 3,
       label: "Hauteur (m)",
-      stroke: "#0d9488",
-      grid: { show: true },
+      labelFont: axisLabelFont,
+      font: axisFont,
+      stroke: "#3b82f6",
+      ticks: { stroke: "#e5e5ea", width: 1 },
+      grid: { show: true, stroke: "#f0f0f2", width: 1 },
       values: (u, vals) => vals.map(v => v.toFixed(2)),
     },
     {
       scale: "Q",
       side: 1,
       label: "Debit (m\u00b3/s)",
-      stroke: "#d97706",
+      labelFont: axisLabelFont,
+      font: axisFont,
+      stroke: "#f97316",
+      ticks: { stroke: "#e5e5ea", width: 1 },
       grid: { show: false },
       splits: (u) => {
         const hSplits = u.axes[1]._splits;
@@ -266,7 +281,7 @@ export default function HydroChart(props) {
         />
       </div>
       <Show when={thresholds()}>
-        <div style={{ display: "flex", "flex-wrap": "wrap", "justify-content": "center", gap: "0.75rem 1.5rem", "margin-top": "0.5rem", "font-size": "13px" }}>
+        <div style={{ display: "flex", "flex-wrap": "wrap", "justify-content": "center", gap: "0.75rem 1.5rem", "margin-top": "0.5rem", "font-size": "12px" }}>
           <For each={thresholds()}>
             {(t) => (
               <div style={{ display: "flex", "align-items": "center", gap: "6px" }}>
@@ -276,7 +291,7 @@ export default function HydroChart(props) {
                   height: "0",
                   "border-top": `2px dashed ${t.color}`,
                 }} />
-                <span style={{ color: t.color }}>{t.label} ({t.value.toFixed(2)} m)</span>
+                <span style={{ color: "#86868b" }}>{t.label} ({t.value.toFixed(2)} m)</span>
               </div>
             )}
           </For>
