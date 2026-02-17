@@ -25,7 +25,11 @@ from config import (
     FORECAST_HORIZONS,
     INPUT_WINDOW_HOURS,
     PROCESSED_DIR,
+    PROPAGATION_HOURS,
     RAW_DIR,
+    RIVER_BRANCHES,
+    RIVER_DISTANCES_KM,
+    STATION_BRANCH,
     STATION_CODES,
     STATIONS,
     STATIONS_NO_Q,
@@ -145,6 +149,50 @@ def add_derived_features(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def add_lag_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Ajoute les features de lag pour les stations amont (H décalé du temps de propagation)."""
+    for code, hours in PROPAGATION_HOURS.items():
+        if hours is None:
+            continue
+        h_col = f"{code}_h"
+        if h_col in df.columns:
+            lag_col = f"{code}_h_lag{hours}h"
+            df[lag_col] = df[h_col].shift(hours)
+    return df
+
+
+def add_static_spatial_features(df: pd.DataFrame, norm_params: dict) -> tuple[pd.DataFrame, dict]:
+    """Ajoute les features statiques de topologie (après normalisation).
+
+    Pour chaque station : distance normalisée, is_upstream, is_barrage, one-hot branche.
+    """
+    max_dist = max(abs(v) for v in RIVER_DISTANCES_KM.values())
+    barrage_codes = {s["code"] for s in STATIONS if s.get("barrage")}
+
+    for code in STATION_CODES:
+        dist_norm = RIVER_DISTANCES_KM[code] / max_dist  # [-1, 1]
+        is_upstream = 1.0 if RIVER_DISTANCES_KM[code] > 0 else 0.0
+        is_barrage = 1.0 if code in barrage_codes else 0.0
+        branch = STATION_BRANCH[code]
+
+        n = len(df)
+        df[f"{code}_dist_to_target"] = dist_norm
+        norm_params[f"{code}_dist_to_target"] = {"min": -1.0, "max": 1.0}
+
+        df[f"{code}_is_upstream"] = is_upstream
+        norm_params[f"{code}_is_upstream"] = {"min": 0.0, "max": 1.0}
+
+        df[f"{code}_is_barrage"] = is_barrage
+        norm_params[f"{code}_is_barrage"] = {"min": 0.0, "max": 1.0}
+
+        for b in RIVER_BRANCHES:
+            col = f"{code}_branch_{b}"
+            df[col] = 1.0 if branch == b else 0.0
+            norm_params[col] = {"min": 0.0, "max": 1.0}
+
+    return df, norm_params
+
+
 def normalize_features(df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """Normalisation min-max. Retourne le df normalisé et les paramètres."""
     norm_params = {}
@@ -242,7 +290,7 @@ def main():
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
 
     # 1. Chargement
-    print("1/6 — Chargement des données brutes...")
+    print("1/8 — Chargement des données brutes...")
     df = load_raw_data()
     print(f"    {len(df)} lignes, {len(df.columns)} colonnes")
 
@@ -250,19 +298,28 @@ def main():
     df = drop_no_q_columns(df)
 
     # 2. Interpolation
-    print("2/6 — Interpolation des trous...")
+    print("2/8 — Interpolation des trous...")
     df = interpolate_gaps(df)
 
     # 3. Features dérivées
-    print("3/6 — Création des features dérivées...")
+    print("3/8 — Création des features dérivées...")
     df = add_derived_features(df)
+
+    # 4. Features de lag (stations amont)
+    print("4/8 — Ajout des features de lag...")
+    df = add_lag_features(df)
+
     # Supprimer la première ligne (NaN du diff)
     df = df.iloc[1:].reset_index(drop=True)
-    print(f"    {len(df.columns) - 1} features")
+    print(f"    {len(df.columns) - 1} features (avant static)")
 
-    # 4. Normalisation
-    print("4/6 — Normalisation min-max...")
+    # 5. Normalisation
+    print("5/8 — Normalisation min-max...")
     df, norm_params = normalize_features(df)
+
+    # 6. Features statiques spatiales (après normalisation, déjà en [0,1] ou [-1,1])
+    print("6/8 — Ajout des features statiques spatiales...")
+    df, norm_params = add_static_spatial_features(df, norm_params)
 
     # Sauvegarder les paramètres de normalisation (NaN → null pour JSON valide)
     norm_path = PROCESSED_DIR / "norm_params.json"
@@ -282,13 +339,13 @@ def main():
     with open(features_path, "w") as f:
         json.dump(feature_cols, f, indent=2)
 
-    # 5. Fenêtrage
-    print(f"5/6 — Fenêtrage (window={args.window}h, horizons={FORECAST_HORIZONS}h)...")
+    # 7. Fenêtrage
+    print(f"7/8 — Fenêtrage (window={args.window}h, horizons={FORECAST_HORIZONS}h)...")
     X, y, timestamps = create_windows(df, args.target, args.window, FORECAST_HORIZONS)
     print(f"    X: {X.shape}, y: {y.shape}")
 
-    # 6. Split
-    print(f"6/6 — Split chronologique (train≤{TRAIN_END}, val≤{VAL_END}, test=reste)...")
+    # 8. Split
+    print(f"8/8 — Split chronologique (train≤{TRAIN_END}, val≤{VAL_END}, test=reste)...")
     splits = split_by_date(X, y, timestamps, TRAIN_END, VAL_END)
 
     for name in ["train", "val", "test"]:

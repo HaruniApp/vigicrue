@@ -17,7 +17,7 @@ import onnx
 import onnxruntime as ort
 import torch
 
-from config import CHECKPOINTS_DIR, ONNX_DIR, PROCESSED_DIR
+from config import CHECKPOINTS_DIR, ONNX_DIR, PROCESSED_DIR, PROPAGATION_HOURS, RIVER_BRANCHES
 
 
 def load_lstm():
@@ -113,6 +113,8 @@ def export_to_onnx(model: torch.nn.Module, config: dict, model_name: str) -> str
         "target_station": meta["target_station"],
         "feature_names": meta["feature_names"],
         "log_transform_cols": meta.get("log_transform_cols", []),
+        "propagation_hours": {k: v for k, v in PROPAGATION_HOURS.items()},
+        "river_branches": RIVER_BRANCHES,
     }
     meta_path = ONNX_DIR / f"{model_name}_meta.json"
     with open(meta_path, "w") as f:

@@ -30,6 +30,36 @@ const STATION_CODES = [
   'J709063002',
 ];
 
+// --- Topology du réseau fluvial (miroir de ml/config.py) ---
+const RIVER_BRANCHES = ['vilaine', 'valiere', 'cantache', 'veuvre'];
+
+const STATION_BRANCH = {
+  J700061001: 'vilaine', J701064001: 'vilaine', J702401001: 'valiere',
+  J702403001: 'valiere', J702402001: 'valiere', J701061001: 'vilaine',
+  J704301001: 'cantache', J705302001: 'cantache', J706062001: 'vilaine',
+  J708311001: 'veuvre', J709063002: 'vilaine',
+};
+
+const RIVER_DISTANCES_KM = {
+  J700061001: 62, J701064001: 48, J702401001: 38, J702403001: 28,
+  J702402001: 22, J701061001: 18, J704301001: 24, J705302001: 12,
+  J706062001: 0, J708311001: -8, J709063002: -25,
+};
+
+const PROPAGATION_HOURS = {
+  J700061001: 9, J701064001: 7, J702401001: 7, J702403001: 6,
+  J702402001: 5, J701061001: 4, J704301001: 5, J705302001: 3,
+  J706062001: null, J708311001: null, J709063002: null,
+};
+
+const MAX_PROPAGATION_HOURS = Math.max(
+  ...Object.values(PROPAGATION_HOURS).filter(v => v != null)
+);
+
+const MAX_DIST = Math.max(...Object.values(RIVER_DISTANCES_KM).map(Math.abs));
+
+const BARRAGE_CODES = new Set(['J701064001', 'J702403001', 'J705302001']);
+
 let session = null;
 let meta = null;
 let normParams = null;
@@ -187,8 +217,11 @@ export async function forecast(stationId) {
   const inputWindow = meta.input_window; // 72
   const now = new Date();
   const lastHour = roundToHour(now);
-  const startDate = new Date(lastHour.getTime() - (inputWindow + 1) * 3600000);
-  const hourlyTimestamps = buildHourlyIndex(inputWindow, lastHour);
+  // Extend fetch window to cover lag features (need MAX_PROPAGATION_HOURS extra hours)
+  const extendedHours = inputWindow + MAX_PROPAGATION_HOURS;
+  const startDate = new Date(lastHour.getTime() - (extendedHours + 1) * 3600000);
+  const extendedTimestamps = buildHourlyIndex(extendedHours, lastHour);
+  const hourlyTimestamps = extendedTimestamps.slice(-inputWindow);
 
   const startStr = formatDateHydro(startDate);
   const endStr = formatDateHydro(now);
@@ -212,18 +245,23 @@ export async function forecast(stationId) {
   const precipResults = await Promise.all(
     STATION_CODES.map(code => {
       const { lat, lon } = STATION_COORDS[code];
-      return fetchPrecipitation(lat, lon, inputWindow + 2);
+      return fetchPrecipitation(lat, lon, extendedHours + 2);
     })
   );
 
-  // Organize hydro data: station -> { h: [], q: [] }
+  // Organize hydro data on extended grid, then slice for main features
+  const stationDataExt = {};
   const stationData = {};
   for (let i = 0; i < STATION_CODES.length; i++) {
     const code = STATION_CODES[i];
+    const hExt = alignToHourlyGrid(hydroResults[i * 2], extendedTimestamps);
+    const qExt = alignToHourlyGrid(hydroResults[i * 2 + 1], extendedTimestamps);
+    const precipExt = alignPrecipToGrid(precipResults[i], extendedTimestamps);
+    stationDataExt[code] = { h: hExt, q: qExt, precip: precipExt };
     stationData[code] = {
-      h: alignToHourlyGrid(hydroResults[i * 2], hourlyTimestamps),
-      q: alignToHourlyGrid(hydroResults[i * 2 + 1], hourlyTimestamps),
-      precip: alignPrecipToGrid(precipResults[i], hourlyTimestamps),
+      h: hExt.slice(-inputWindow),
+      q: qExt.slice(-inputWindow),
+      precip: precipExt.slice(-inputWindow),
     };
   }
 
@@ -276,7 +314,37 @@ export async function forecast(stationId) {
   featureMap['doy_sin'] = doySin;
   featureMap['doy_cos'] = doyCos;
 
-  // Build tensor: shape (1, 72, 59), ordered by feature_names
+  // Lag features: H of upstream stations shifted by propagation time
+  // Use raw H values (before log-transform) — same as training pipeline
+  for (const code of STATION_CODES) {
+    const lag = PROPAGATION_HOURS[code];
+    if (lag == null) continue;
+    const hExt = stationDataExt[code].h; // extended raw array
+    // Slice: for each timestep t in [0..inputWindow-1], lag value = extendedHours - inputWindow + t - lag
+    const lagArr = new Array(inputWindow);
+    for (let t = 0; t < inputWindow; t++) {
+      const extIdx = (extendedHours - inputWindow) + t - lag;
+      lagArr[t] = extIdx >= 0 ? (hExt[extIdx] ?? 0) : (hExt[0] ?? 0);
+    }
+    featureMap[`${code}_h_lag${lag}h`] = lagArr;
+  }
+
+  // Static spatial features: constant arrays for each station
+  for (const code of STATION_CODES) {
+    const distNorm = RIVER_DISTANCES_KM[code] / MAX_DIST;
+    const isUpstream = RIVER_DISTANCES_KM[code] > 0 ? 1.0 : 0.0;
+    const isBarrage = BARRAGE_CODES.has(code) ? 1.0 : 0.0;
+    const branch = STATION_BRANCH[code];
+
+    featureMap[`${code}_dist_to_target`] = new Array(inputWindow).fill(distNorm);
+    featureMap[`${code}_is_upstream`] = new Array(inputWindow).fill(isUpstream);
+    featureMap[`${code}_is_barrage`] = new Array(inputWindow).fill(isBarrage);
+    for (const b of RIVER_BRANCHES) {
+      featureMap[`${code}_branch_${b}`] = new Array(inputWindow).fill(branch === b ? 1.0 : 0.0);
+    }
+  }
+
+  // Build tensor: shape (1, 72, n_features), ordered by feature_names
   const tensorData = new Float32Array(inputWindow * meta.n_features);
   for (let t = 0; t < inputWindow; t++) {
     for (let f = 0; f < meta.feature_names.length; f++) {
