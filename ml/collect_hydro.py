@@ -119,7 +119,9 @@ def collect_station(station: dict, start_date: str, end_date: str, full: bool = 
     print(f"Station: {label} ({code})")
     print(f"{'='*60}")
 
-    for variable in ["H", "Q"]:
+    variables = ["H"] if station.get("barrage") else ["H", "Q"]
+
+    for variable in variables:
         out_path = RAW_DIR / f"{code}_{variable.lower()}.csv"
         existing_df = None
         effective_start = start_date

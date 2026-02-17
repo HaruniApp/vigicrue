@@ -29,6 +29,7 @@ STATIONS = [
         "lon": -1.128,
         "river": "Vilaine",
         "position": "amont",
+        "barrage": True,
     },
     {
         "code": "J702401001",
@@ -45,6 +46,7 @@ STATIONS = [
         "lon": -1.164,
         "river": "Valière",
         "position": "amont",
+        "barrage": True,
     },
     {
         "code": "J702402001",
@@ -77,6 +79,7 @@ STATIONS = [
         "lon": -1.293,
         "river": "Cantache",
         "position": "amont",
+        "barrage": True,
     },
     {
         "code": "J706062001",
