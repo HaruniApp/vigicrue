@@ -227,7 +227,18 @@ export async function forecast(stationId) {
     };
   }
 
-  // Compute derivatives
+  // Log-transform H and Q (before derivatives, matching prepare_dataset.py)
+  const logTransformCols = new Set(meta.log_transform_cols ?? []);
+  for (const code of STATION_CODES) {
+    if (logTransformCols.has(`${code}_h`)) {
+      stationData[code].h = stationData[code].h.map(v => Math.log1p(Math.max(v, 0)));
+    }
+    if (logTransformCols.has(`${code}_q`)) {
+      stationData[code].q = stationData[code].q.map(v => Math.log1p(Math.max(v, 0)));
+    }
+  }
+
+  // Compute derivatives (on log-transformed values)
   for (const code of STATION_CODES) {
     stationData[code].dh = computeDerivative(stationData[code].h);
     stationData[code].dq = computeDerivative(stationData[code].q);
@@ -318,8 +329,12 @@ export async function forecast(stationId) {
 
   console.log(`\nRaw model output: [${Array.from(predictions).map(v => v.toFixed(6)).join(', ')}]`);
 
+  const targetIsLog = logTransformCols.has(`${meta.target_station}_h`);
+
   const forecasts = meta.forecast_horizons.map((h, i) => {
-    const rawMm = predictions[i] * (targetMax - targetMin) + targetMin;
+    let rawMm = predictions[i] * (targetMax - targetMin) + targetMin;
+    // If target was log-transformed, undo: expm1(log-space value) → mm
+    if (targetIsLog) rawMm = Math.expm1(rawMm);
     const meters = rawMm / 1000;
     const timestamp = new Date(lastHour.getTime() + h * 3600000);
     console.log(`  ${`t+${h}h`.padEnd(5)}: norm=${predictions[i].toFixed(6)} → ${rawMm.toFixed(1)} mm → ${meters.toFixed(3)} m`);

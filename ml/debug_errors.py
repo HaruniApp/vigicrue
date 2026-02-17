@@ -30,6 +30,15 @@ def main():
     np_t = norm_params[target_col]
     t_min, t_max = np_t["min"], np_t["max"]
     t_range = t_max - t_min
+    log_cols = set(meta.get("log_transform_cols", []))
+    target_is_log = target_col in log_cols
+
+    def denorm_to_mm(normalized):
+        """Dénormalise: min-max inverse, puis expm1 si log-transform."""
+        val = normalized * t_range + t_min
+        if target_is_log:
+            val = np.expm1(val)
+        return val
 
     # Run ONNX on all test samples
     session = ort.InferenceSession(str(ONNX_DIR / "tft.onnx"))
@@ -41,14 +50,16 @@ def main():
 
     # Current H at last timestep (normalized)
     h_last_norm = X_test[:, -1, target_idx]
-    h_last_mm = h_last_norm * t_range + t_min
+    h_last_mm = denorm_to_mm(h_last_norm)
 
     # Errors in mm for each horizon
     print("=" * 70)
     print("Distribution des erreurs par horizon (mm)")
     print("=" * 70)
     for i, h in enumerate(FORECAST_HORIZONS):
-        err_mm = (all_preds[:, i] - y_test[:, i]) * t_range
+        pred_mm = denorm_to_mm(all_preds[:, i])
+        true_mm = denorm_to_mm(y_test[:, i])
+        err_mm = pred_mm - true_mm
         abs_err = np.abs(err_mm)
         print(f"\n  t+{h}h:")
         print(f"    Biais moyen : {np.mean(err_mm):+.1f} mm")
@@ -64,9 +75,9 @@ def main():
     print("Erreur t+1h par niveau d'eau actuel")
     print("=" * 70)
 
-    err_t1_mm = (all_preds[:, 0] - y_test[:, 0]) * t_range
-    pred_t1_mm = all_preds[:, 0] * t_range + t_min
-    true_t1_mm = y_test[:, 0] * t_range + t_min
+    pred_t1_mm = denorm_to_mm(all_preds[:, 0])
+    true_t1_mm = denorm_to_mm(y_test[:, 0])
+    err_t1_mm = pred_t1_mm - true_t1_mm
 
     # Bins par niveau H actuel
     bins = [0, 200, 400, 600, 800, 1000, 1200, 1500, 2000, 3000]
@@ -94,9 +105,9 @@ def main():
 
     if n_crue > 0:
         for i, h in enumerate(FORECAST_HORIZONS):
-            err = (all_preds[mask_crue, i] - y_test[mask_crue, i]) * t_range
-            pred = all_preds[mask_crue, i] * t_range + t_min
-            true = y_test[mask_crue, i] * t_range + t_min
+            pred = denorm_to_mm(all_preds[mask_crue, i])
+            true = denorm_to_mm(y_test[mask_crue, i])
+            err = pred - true
             print(f"\n  t+{h}h (N={n_crue}):")
             print(f"    Biais moyen : {np.mean(err):+.1f} mm")
             print(f"    MAE         : {np.mean(np.abs(err)):.1f} mm")
@@ -109,15 +120,13 @@ def main():
     print("Erreur t+1h par tendance (crue vs décrue)")
     print("=" * 70)
 
-    # dH = dérivée au dernier pas de temps
-    dh_idx = feature_names.index(f"{meta['target_station']}_dh")
-    dh_last_norm = X_test[:, -1, dh_idx]
-    dh_np = norm_params[f"{meta['target_station']}_dh"]
-    dh_last_mm = dh_last_norm * (dh_np["max"] - dh_np["min"]) + dh_np["min"]
+    # dH basé sur H dénormalisé (en mm) entre les 2 derniers timesteps
+    h_prev_mm = denorm_to_mm(X_test[:, -2, target_idx])
+    dh_mm = h_last_mm - h_prev_mm
 
-    for label, mask in [("Décrue (dH < -10 mm/h)", dh_last_mm < -10),
-                         ("Stable (|dH| ≤ 10 mm/h)", np.abs(dh_last_mm) <= 10),
-                         ("Crue (dH > 10 mm/h)", dh_last_mm > 10)]:
+    for label, mask in [("Décrue (dH < -10 mm/h)", dh_mm < -10),
+                         ("Stable (|dH| ≤ 10 mm/h)", np.abs(dh_mm) <= 10),
+                         ("Crue (dH > 10 mm/h)", dh_mm > 10)]:
         n = mask.sum()
         if n == 0:
             continue
