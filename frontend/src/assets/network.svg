@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" font-family="Inter, -apple-system, sans-serif">
+  <defs>
+    <!-- Flèche de flux -->
+    <marker id="arrow" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,3 L0,6" fill="#0d9488" opacity="0.6"/>
+    </marker>
+    <marker id="arrow-val" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,3 L0,6" fill="#2563eb" opacity="0.6"/>
+    </marker>
+    <marker id="arrow-cant" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,3 L0,6" fill="#7c3aed" opacity="0.6"/>
+    </marker>
+    <marker id="arrow-veu" viewBox="0 0 10 6" refX="10" refY="3" markerWidth="8" markerHeight="5" orient="auto">
+      <path d="M0,0 L10,3 L0,6" fill="#ea580c" opacity="0.6"/>
+    </marker>
+    <!-- Symbole barrage -->
+    <symbol id="dam" viewBox="0 0 20 12">
+      <rect x="0" y="0" width="20" height="12" rx="2" fill="#f59e0b" opacity="0.8"/>
+      <line x1="4" y1="3" x2="4" y2="9" stroke="#fff" stroke-width="1.5"/>
+      <line x1="10" y1="3" x2="10" y2="9" stroke="#fff" stroke-width="1.5"/>
+      <line x1="16" y1="3" x2="16" y2="9" stroke="#fff" stroke-width="1.5"/>
+    </symbol>
+  </defs>
+
+  <!-- Titre -->
+  <text x="480" y="32" text-anchor="middle" font-size="18" font-weight="700" fill="#1d1d1f">Bassin Vilaine Amont — Réseau hydrographique</text>
+  <text x="480" y="52" text-anchor="middle" font-size="12" fill="#86868b">11 stations hydrométriques • Amont (est) → Aval (ouest)</text>
+
+  <!-- === RIVIÈRES === -->
+
+  <!-- Vilaine (principale) — teal -->
+  <path d="M 80,340 C 140,340 170,340 210,340 L 400,340 C 450,340 500,340 540,340 L 640,340 C 700,340 740,340 760,340 L 880,340"
+        stroke="#0d9488" stroke-width="4" fill="none" opacity="0.3"/>
+  <!-- Flux Vilaine -->
+  <line x1="130" y1="340" x2="180" y2="340" stroke="#0d9488" stroke-width="2.5" marker-end="url(#arrow)" opacity="0.5"/>
+  <line x1="290" y1="340" x2="350" y2="340" stroke="#0d9488" stroke-width="2.5" marker-end="url(#arrow)" opacity="0.5"/>
+  <line x1="570" y1="340" x2="610" y2="340" stroke="#0d9488" stroke-width="2.5" marker-end="url(#arrow)" opacity="0.5"/>
+  <line x1="790" y1="340" x2="840" y2="340" stroke="#0d9488" stroke-width="2.5" marker-end="url(#arrow)" opacity="0.5"/>
+
+  <!-- Valière (affluent) — bleu -->
+  <path d="M 220,130 C 250,150 280,175 310,200 C 340,230 370,270 400,340"
+        stroke="#2563eb" stroke-width="3" fill="none" opacity="0.3"/>
+  <line x1="250" y1="155" x2="280" y2="185" stroke="#2563eb" stroke-width="2" marker-end="url(#arrow-val)" opacity="0.5"/>
+
+  <!-- Cantache (affluent) — violet -->
+  <path d="M 470,130 C 490,170 510,210 520,250 C 530,290 535,310 540,340"
+        stroke="#7c3aed" stroke-width="3" fill="none" opacity="0.3"/>
+  <line x1="485" y1="165" x2="500" y2="200" stroke="#7c3aed" stroke-width="2" marker-end="url(#arrow-cant)" opacity="0.5"/>
+
+  <!-- Veuvre/Chevré (affluent) — orange -->
+  <path d="M 750,190 C 755,230 758,270 760,340"
+        stroke="#ea580c" stroke-width="3" fill="none" opacity="0.3"/>
+  <line x1="752" y1="220" x2="755" y2="260" stroke="#ea580c" stroke-width="2" marker-end="url(#arrow-veu)" opacity="0.5"/>
+
+  <!-- === STATIONS === -->
+
+  <!-- Bourgon — Vilaine amont extrême -->
+  <circle cx="80" cy="340" r="7" fill="#0d9488" stroke="#fff" stroke-width="2"/>
+  <text x="80" y="370" text-anchor="middle" font-size="11" font-weight="600" fill="#1d1d1f">Bourgon</text>
+  <text x="80" y="383" text-anchor="middle" font-size="9" fill="#86868b">J700061001</text>
+
+  <!-- La Chapelle-Erbrée — barrage Vilaine -->
+  <circle cx="210" cy="340" r="7" fill="#0d9488" stroke="#fff" stroke-width="2"/>
+  <use href="#dam" x="200" y="310" width="20" height="12"/>
+  <text x="210" y="370" text-anchor="middle" font-size="11" font-weight="600" fill="#1d1d1f">La Chapelle-Erbrée</text>
+  <text x="210" y="383" text-anchor="middle" font-size="9" fill="#86868b">barrage • J701064001</text>
+
+  <!-- Erbrée - Les Ravenières — Valière amont -->
+  <circle cx="220" cy="130" r="7" fill="#2563eb" stroke="#fff" stroke-width="2"/>
+  <text x="220" y="115" text-anchor="middle" font-size="11" font-weight="600" fill="#1d1d1f">Erbrée - Ravenières</text>
+  <text x="220" y="128" text-anchor="middle" font-size="9" fill="#86868b">J702401001</text>
+
+  <!-- Erbrée - retenue Valière — barrage -->
+  <circle cx="300" cy="195" r="7" fill="#2563eb" stroke="#fff" stroke-width="2"/>
+  <use href="#dam" x="290" y="170" width="20" height="12"/>
+  <text x="300" y="225" text-anchor="start" font-size="11" font-weight="600" fill="#1d1d1f">Erbrée - retenue</text>
+  <text x="300" y="238" text-anchor="start" font-size="9" fill="#86868b">barrage • J702403001</text>
+
+  <!-- Vitré - Château des Rochers — aval retenue Valière -->
+  <circle cx="370" cy="270" r="7" fill="#2563eb" stroke="#fff" stroke-width="2"/>
+  <text x="380" y="263" text-anchor="start" font-size="11" font-weight="600" fill="#1d1d1f">Château des Rochers</text>
+  <text x="380" y="276" text-anchor="start" font-size="9" fill="#86868b">J702402001</text>
+
+  <!-- Vitré - Bas Pont — Vilaine central -->
+  <circle cx="400" cy="340" r="7" fill="#0d9488" stroke="#fff" stroke-width="2"/>
+  <text x="400" y="370" text-anchor="middle" font-size="11" font-weight="600" fill="#1d1d1f">Vitré - Bas Pont</text>
+  <text x="400" y="383" text-anchor="middle" font-size="9" fill="#86868b">J701061001</text>
+
+  <!-- Taillis — Cantache -->
+  <circle cx="470" cy="130" r="7" fill="#7c3aed" stroke="#fff" stroke-width="2"/>
+  <text x="470" y="115" text-anchor="middle" font-size="11" font-weight="600" fill="#1d1d1f">Taillis</text>
+  <text x="470" y="128" text-anchor="middle" font-size="9" fill="#86868b">J704301001</text>
+
+  <!-- Pocé-les-Bois — barrage Cantache -->
+  <circle cx="515" cy="240" r="7" fill="#7c3aed" stroke="#fff" stroke-width="2"/>
+  <use href="#dam" x="505" y="215" width="20" height="12"/>
+  <text x="530" y="237" text-anchor="start" font-size="11" font-weight="600" fill="#1d1d1f">Pocé-les-Bois</text>
+  <text x="530" y="250" text-anchor="start" font-size="9" fill="#86868b">barrage • J705302001</text>
+
+  <!-- Châteaubourg — Vilaine central -->
+  <circle cx="640" cy="340" r="7" fill="#0d9488" stroke="#fff" stroke-width="2"/>
+  <text x="640" y="370" text-anchor="middle" font-size="11" font-weight="600" fill="#1d1d1f">Châteaubourg</text>
+  <text x="640" y="383" text-anchor="middle" font-size="9" fill="#86868b">J706062001</text>
+
+  <!-- La Bouëxière — Veuvre/Chevré -->
+  <circle cx="750" cy="190" r="7" fill="#ea580c" stroke="#fff" stroke-width="2"/>
+  <text x="750" y="175" text-anchor="middle" font-size="11" font-weight="600" fill="#1d1d1f">La Bouëxière</text>
+  <text x="750" y="188" text-anchor="middle" font-size="9" fill="#86868b">J708311001</text>
+
+  <!-- Cesson-Sévigné — Vilaine aval extrême -->
+  <circle cx="880" cy="340" r="7" fill="#0d9488" stroke="#fff" stroke-width="2"/>
+  <text x="880" y="370" text-anchor="middle" font-size="11" font-weight="600" fill="#1d1d1f">Cesson-Sévigné</text>
+  <text x="880" y="383" text-anchor="middle" font-size="9" fill="#86868b">J709063002</text>
+
+  <!-- === LÉGENDE === -->
+  <g transform="translate(30, 440)">
+    <text x="0" y="0" font-size="11" font-weight="600" fill="#1d1d1f">Légende</text>
+
+    <line x1="0" y1="20" x2="40" y2="20" stroke="#0d9488" stroke-width="3" opacity="0.5"/>
+    <text x="50" y="24" font-size="10" fill="#6e6e73">Vilaine</text>
+
+    <line x1="120" y1="20" x2="160" y2="20" stroke="#2563eb" stroke-width="3" opacity="0.5"/>
+    <text x="170" y="24" font-size="10" fill="#6e6e73">Valière</text>
+
+    <line x1="240" y1="20" x2="280" y2="20" stroke="#7c3aed" stroke-width="3" opacity="0.5"/>
+    <text x="290" y="24" font-size="10" fill="#6e6e73">Cantache</text>
+
+    <line x1="380" y1="20" x2="420" y2="20" stroke="#ea580c" stroke-width="3" opacity="0.5"/>
+    <text x="430" y="24" font-size="10" fill="#6e6e73">Veuvre / Chevré</text>
+
+    <circle cx="590" cy="19" r="5" fill="#0d9488" stroke="#fff" stroke-width="1.5"/>
+    <text x="602" y="23" font-size="10" fill="#6e6e73">Station</text>
+
+    <use href="#dam" x="660" y="13" width="16" height="10"/>
+    <text x="682" y="23" font-size="10" fill="#6e6e73">Barrage</text>
+  </g>
+
+  <!-- Temps de propagation -->
+  <g transform="translate(30, 490)">
+    <text x="0" y="0" font-size="9" fill="#86868b">Temps de propagation estimés : Bourgon → Cesson-Sévigné ≈ 11–27h</text>
+  </g>
+</svg>
