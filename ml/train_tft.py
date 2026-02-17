@@ -32,7 +32,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=EPOCHS)
     parser.add_argument("--hidden", type=int, default=256, help="Hidden size du TFT")
     parser.add_argument("--attention-heads", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=5e-4)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--patience", type=int, default=PATIENCE)
     args = parser.parse_args()
@@ -142,8 +142,16 @@ def main():
     val_loader = torch.utils.data.DataLoader(val_ds, batch_size=args.batch_size)
     test_loader = torch.utils.data.DataLoader(test_ds, batch_size=args.batch_size)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
+
+    # Warmup linéaire sur 5 epochs puis ReduceLROnPlateau
+    warmup_epochs = 5
+    warmup_scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=0.01, end_factor=1.0, total_iters=warmup_epochs
+    )
+    plateau_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer, patience=5, factor=0.5
+    )
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -181,7 +189,10 @@ def main():
                 nv += 1
         val_loss /= nv
 
-        scheduler.step(val_loss)
+        if epoch <= warmup_epochs:
+            warmup_scheduler.step()
+        else:
+            plateau_scheduler.step(val_loss)
         lr = optimizer.param_groups[0]["lr"]
 
         marker = ""
