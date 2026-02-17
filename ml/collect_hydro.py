@@ -37,7 +37,7 @@ HEADERS = {
 
 MAX_RETRIES = 3
 RETRY_DELAY = 5  # secondes
-REQUEST_DELAY = 1  # délai entre requêtes pour ne pas surcharger l'API
+REQUEST_DELAY = 2  # délai entre requêtes pour ne pas surcharger l'API
 
 
 def fetch_series(station_id: str, start: str, end: str, variable: str) -> list[dict]:
