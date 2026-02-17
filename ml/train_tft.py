@@ -271,8 +271,9 @@ class SimplifiedTFT(torch.nn.Module):
             torch.nn.Dropout(dropout),
             torch.nn.Linear(hidden_size * 4, hidden_size),
         )
+        # Pooling: concat last timestep + mean → 2*hidden_size
         self.output = torch.nn.Sequential(
-            torch.nn.Linear(hidden_size, hidden_size),
+            torch.nn.Linear(hidden_size * 2, hidden_size),
             torch.nn.ReLU(),
             torch.nn.Dropout(dropout),
             torch.nn.Linear(hidden_size, n_horizons),
@@ -290,8 +291,11 @@ class SimplifiedTFT(torch.nn.Module):
         ffn_out = self.ffn(x)
         x = self.norm2(x + ffn_out)
 
-        # Utiliser le dernier pas de temps
-        return self.output(x[:, -1, :])
+        # Concat dernier timestep + mean pooling sur tous les timesteps
+        last = x[:, -1, :]           # état le plus récent
+        avg = x.mean(dim=1)          # contexte global (72h)
+        pooled = torch.cat([last, avg], dim=1)
+        return self.output(pooled)
 
 
 if __name__ == "__main__":
