@@ -87,6 +87,7 @@ def main():
             subsample=0.8,
             colsample_bytree=0.8,
             tree_method="hist",
+            device="cuda",
             early_stopping_rounds=20,
             random_state=42,
         )
