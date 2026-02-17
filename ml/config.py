@@ -132,7 +132,7 @@ VAL_END = "2024-12-31"
 BATCH_SIZE = 256
 LEARNING_RATE = 1e-3
 EPOCHS = 100
-PATIENCE = 10  # early stopping
+PATIENCE = 20  # early stopping
 
 # --- Station cible par défaut ---
 TARGET_STATION = "J706062001"  # Châteaubourg - Bel Air
