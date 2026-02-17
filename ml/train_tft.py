@@ -1,7 +1,7 @@
 """Temporal Fusion Transformer (TFT) simplifié pour la prédiction de crues.
 
 LSTM encoder + Multi-Head Self-Attention + dense decoder.
-Suréchantillonnage des crues + loss pondérée pour réduire le biais en crue.
+Suréchantillonnage des crues pour réduire le biais en crue.
 
 Usage:
     python train_tft.py
@@ -30,8 +30,8 @@ warnings.filterwarnings("ignore", category=UserWarning)
 def main():
     parser = argparse.ArgumentParser(description="Entraînement TFT")
     parser.add_argument("--epochs", type=int, default=EPOCHS)
-    parser.add_argument("--hidden", type=int, default=32, help="Hidden size du TFT")
-    parser.add_argument("--attention-heads", type=int, default=4)
+    parser.add_argument("--hidden", type=int, default=128, help="Hidden size du TFT")
+    parser.add_argument("--attention-heads", type=int, default=8)
     parser.add_argument("--lr", type=float, default=LEARNING_RATE)
     parser.add_argument("--batch-size", type=int, default=128)
     parser.add_argument("--patience", type=int, default=PATIENCE)
@@ -111,15 +111,6 @@ def main():
     X_train = torch.from_numpy(X_train_np)
     y_train = torch.from_numpy(y_train_np)
 
-    # --- Poids par échantillon pour loss pondérée ---
-    # Plus le H cible est élevé, plus le poids est important
-    h_last_norm_train = X_train_np[:, -1, target_idx]
-    h_last_mm_train = h_last_norm_train * t_range + t_min
-    # Poids = 1 + (H_mm / 1000)^2 → H=0: w=1, H=1000: w=2, H=2000: w=5
-    sample_weights = torch.from_numpy(
-        (1.0 + (np.maximum(h_last_mm_train, 0) / 1000.0) ** 2).astype(np.float32)
-    )
-
     # Device
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -143,7 +134,7 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Paramètres: {total_params:,}")
 
-    train_ds = torch.utils.data.TensorDataset(X_train, y_train, sample_weights)
+    train_ds = torch.utils.data.TensorDataset(X_train, y_train)
     val_ds = torch.utils.data.TensorDataset(X_val, y_val)
     test_ds = torch.utils.data.TensorDataset(X_test, y_test)
 
@@ -161,18 +152,17 @@ def main():
     print(f"{'Epoch':>6} {'Train Loss':>12} {'Val Loss':>12} {'LR':>10}")
     print("-" * 44)
 
+    criterion = torch.nn.MSELoss()
+
     for epoch in range(1, args.epochs + 1):
-        # Train (weighted MSE: samples with high H count more)
+        # Train
         model.train()
         train_loss = 0.0
         n = 0
-        for X_b, y_b, w_b in train_loader:
-            X_b, y_b, w_b = X_b.to(device), y_b.to(device), w_b.to(device)
+        for X_b, y_b in train_loader:
+            X_b, y_b = X_b.to(device), y_b.to(device)
             optimizer.zero_grad()
-            pred = model(X_b)
-            # Weighted MSE: (pred - target)^2 * weight, averaged
-            per_sample_loss = ((pred - y_b) ** 2).mean(dim=1)  # mean over horizons
-            loss = (per_sample_loss * w_b).mean()
+            loss = criterion(model(X_b), y_b)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -187,7 +177,7 @@ def main():
         with torch.no_grad():
             for X_b, y_b in val_loader:
                 X_b, y_b = X_b.to(device), y_b.to(device)
-                val_loss += torch.nn.functional.mse_loss(model(X_b), y_b).item()
+                val_loss += criterion(model(X_b), y_b).item()
                 nv += 1
         val_loss /= nv
 
