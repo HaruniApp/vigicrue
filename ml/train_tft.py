@@ -207,6 +207,8 @@ def main():
     model.load_state_dict(torch.load(CHECKPOINTS_DIR / "tft_best.pt", weights_only=True))
     model.eval()
 
+    results = {"model": "TFT", "val": {}, "test": {}}
+
     for split_name, loader in [("Val", val_loader), ("Test", test_loader)]:
         all_preds, all_targets = [], []
         with torch.no_grad():
@@ -217,14 +219,20 @@ def main():
         y_pred = np.concatenate(all_preds)
         y_true = np.concatenate(all_targets)
 
+        split_key = "val" if split_name == "Val" else "test"
         print(f"\n{split_name}:")
         for i, h in enumerate(FORECAST_HORIZONS):
-            rmse = np.sqrt(np.mean((y_true[:, i] - y_pred[:, i]) ** 2))
-            mae = np.mean(np.abs(y_true[:, i] - y_pred[:, i]))
+            rmse = float(np.sqrt(np.mean((y_true[:, i] - y_pred[:, i]) ** 2)))
+            mae = float(np.mean(np.abs(y_true[:, i] - y_pred[:, i])))
             ss_res = np.sum((y_true[:, i] - y_pred[:, i]) ** 2)
             ss_tot = np.sum((y_true[:, i] - np.mean(y_true[:, i])) ** 2)
-            nse = 1.0 - ss_res / ss_tot if ss_tot > 1e-10 else 0.0
+            nse = float(1.0 - ss_res / ss_tot) if ss_tot > 1e-10 else 0.0
+            results[split_key][f"t+{h}h"] = {"rmse": rmse, "mae": mae, "nse": nse}
             print(f"  t+{h}h: NSE={nse:.4f}, RMSE={rmse:.6f}, MAE={mae:.6f}")
+
+    # Sauvegarder les résultats
+    with open(CHECKPOINTS_DIR / "tft_results.json", "w") as f:
+        json.dump(results, f, indent=2)
 
     # Sauvegarder config pour export
     model_config = {
