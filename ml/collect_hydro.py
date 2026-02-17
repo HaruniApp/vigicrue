@@ -3,10 +3,14 @@
 L'API retourne au maximum ~1 an de données horaires par requête.
 On découpe donc la plage en segments annuels et on concatène.
 
+Mode incrémental : si un CSV existe déjà, ne récupère que les données
+postérieures au dernier timestamp présent.
+
 Usage:
     python collect_hydro.py
-    python collect_hydro.py --start 2020-01-01 --end 2025-02-01
+    python collect_hydro.py --start 2020-01-01
     python collect_hydro.py --station J706062001
+    python collect_hydro.py --full   # ignore les CSV existants
 """
 
 import argparse
@@ -93,7 +97,21 @@ def generate_yearly_ranges(start_date: str, end_date: str) -> list[tuple[str, st
     return ranges
 
 
-def collect_station(station: dict, start_date: str, end_date: str) -> None:
+def get_last_timestamp(csv_path) -> str | None:
+    """Retourne le dernier timestamp d'un CSV existant, ou None."""
+    if not csv_path.exists():
+        return None
+    try:
+        df = pd.read_csv(csv_path, parse_dates=["timestamp"])
+        if df.empty:
+            return None
+        last = df["timestamp"].max()
+        return last.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def collect_station(station: dict, start_date: str, end_date: str, full: bool = False) -> None:
     """Collecte H et Q pour une station et sauvegarde en CSV."""
     code = station["code"]
     label = station["label"]
@@ -101,27 +119,50 @@ def collect_station(station: dict, start_date: str, end_date: str) -> None:
     print(f"Station: {label} ({code})")
     print(f"{'='*60}")
 
-    ranges = generate_yearly_ranges(start_date, end_date)
-
     for variable in ["H", "Q"]:
+        out_path = RAW_DIR / f"{code}_{variable.lower()}.csv"
+        existing_df = None
+        effective_start = start_date
+
+        # Mode incrémental : reprendre après le dernier timestamp
+        if not full:
+            last_ts = get_last_timestamp(out_path)
+            if last_ts is not None:
+                if last_ts >= end_date:
+                    print(f"\n  {variable}: déjà à jour (jusqu'au {last_ts}), skip")
+                    continue
+                effective_start = last_ts
+                existing_df = pd.read_csv(out_path, parse_dates=["timestamp"])
+                print(f"\n  {variable}: incrémental depuis {last_ts}")
+
+        ranges = generate_yearly_ranges(effective_start, end_date)
         all_records = []
-        print(f"\n  Variable {variable} — {len(ranges)} segments")
+        print(f"  Variable {variable} — {len(ranges)} segments")
 
         for seg_start, seg_end in tqdm(ranges, desc=f"  {variable}", leave=False):
             records = fetch_series(code, seg_start, seg_end, variable)
             all_records.extend(records)
             time.sleep(REQUEST_DELAY)
 
-        if not all_records:
+        if not all_records and existing_df is None:
             print(f"  ⚠ Aucune donnée {variable} pour {code}")
             continue
 
-        df = pd.DataFrame(all_records)
-        df["t"] = pd.to_datetime(df["t"])
-        df = df.drop_duplicates(subset="t").sort_values("t").reset_index(drop=True)
-        df.columns = ["timestamp", variable.lower()]
+        new_df = pd.DataFrame(all_records)
+        if not new_df.empty:
+            new_df["t"] = pd.to_datetime(new_df["t"])
+            new_df.columns = ["timestamp", variable.lower()]
 
-        out_path = RAW_DIR / f"{code}_{variable.lower()}.csv"
+        # Fusionner avec les données existantes
+        if existing_df is not None and not new_df.empty:
+            df = pd.concat([existing_df, new_df], ignore_index=True)
+        elif existing_df is not None:
+            df = existing_df
+        else:
+            df = new_df
+
+        df = df.drop_duplicates(subset="timestamp").sort_values("timestamp").reset_index(drop=True)
+
         df.to_csv(out_path, index=False)
         print(f"  ✓ {variable}: {len(df)} points → {out_path.name}")
         print(f"    Plage: {df['timestamp'].min()} → {df['timestamp'].max()}")
@@ -132,6 +173,7 @@ def main():
     parser.add_argument("--start", default=COLLECT_START_DATE, help="Date de début (YYYY-MM-DD)")
     parser.add_argument("--end", default=COLLECT_END_DATE, help="Date de fin (YYYY-MM-DD)")
     parser.add_argument("--station", default=None, help="Code station unique (sinon toutes)")
+    parser.add_argument("--full", action="store_true", help="Collecte complète (ignore les CSV existants)")
     args = parser.parse_args()
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
@@ -143,11 +185,12 @@ def main():
             print(f"Station {args.station} inconnue")
             return
 
-    print(f"Collecte Hydro EauFrance : {args.start} → {args.end}")
+    mode = "complète" if args.full else "incrémentale"
+    print(f"Collecte Hydro EauFrance ({mode}) : {args.start} → {args.end}")
     print(f"Stations : {len(stations)}")
 
     for station in stations:
-        collect_station(station, args.start, args.end)
+        collect_station(station, args.start, args.end, full=args.full)
 
     print("\n✓ Collecte terminée.")
 

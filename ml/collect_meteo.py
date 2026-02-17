@@ -3,9 +3,13 @@
 Open-Meteo accepte des plages longues (plusieurs années) en une seule requête,
 mais on découpe en segments annuels pour fiabilité.
 
+Mode incrémental : si un CSV existe déjà, ne récupère que les données
+postérieures au dernier timestamp présent.
+
 Usage:
     python collect_meteo.py
-    python collect_meteo.py --start 2000-01-01 --end 2025-02-01
+    python collect_meteo.py --start 2000-01-01
+    python collect_meteo.py --full   # ignore les CSV existants
 """
 
 import argparse
@@ -78,15 +82,46 @@ def generate_yearly_ranges(start_date: str, end_date: str) -> list[tuple[str, st
     return ranges
 
 
-def collect_station_meteo(station: dict, start_date: str, end_date: str) -> None:
+def get_last_timestamp(csv_path) -> str | None:
+    """Retourne le dernier timestamp d'un CSV existant, ou None."""
+    if not csv_path.exists():
+        return None
+    try:
+        df = pd.read_csv(csv_path, parse_dates=["timestamp"])
+        if df.empty:
+            return None
+        last = df["timestamp"].max()
+        return last.strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def collect_station_meteo(station: dict, start_date: str, end_date: str, full: bool = False) -> None:
     """Collecte les précipitations pour une station."""
     code = station["code"]
     label = station["label"]
     lat, lon = station["lat"], station["lon"]
 
-    print(f"\n  {label} ({code}) — lat={lat}, lon={lon}")
+    out_path = RAW_DIR / f"{code}_precip.csv"
+    existing_df = None
+    effective_start = start_date
 
-    ranges = generate_yearly_ranges(start_date, end_date)
+    # Mode incrémental
+    if not full:
+        last_ts = get_last_timestamp(out_path)
+        if last_ts is not None:
+            if last_ts >= end_date:
+                print(f"\n  {label} ({code}) — déjà à jour, skip")
+                return
+            effective_start = last_ts
+            existing_df = pd.read_csv(out_path, parse_dates=["timestamp"])
+            print(f"\n  {label} ({code}) — incrémental depuis {last_ts}")
+        else:
+            print(f"\n  {label} ({code}) — lat={lat}, lon={lon}")
+    else:
+        print(f"\n  {label} ({code}) — lat={lat}, lon={lon}")
+
+    ranges = generate_yearly_ranges(effective_start, end_date)
     all_dfs = []
 
     for seg_start, seg_end in tqdm(ranges, desc=f"  {code}", leave=False):
@@ -95,14 +130,22 @@ def collect_station_meteo(station: dict, start_date: str, end_date: str) -> None
             all_dfs.append(df)
         time.sleep(REQUEST_DELAY)
 
-    if not all_dfs:
+    if not all_dfs and existing_df is None:
         print(f"  ⚠ Aucune donnée météo pour {code}")
         return
 
-    df = pd.concat(all_dfs, ignore_index=True)
+    new_df = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+
+    # Fusionner avec les données existantes
+    if existing_df is not None and not new_df.empty:
+        df = pd.concat([existing_df, new_df], ignore_index=True)
+    elif existing_df is not None:
+        df = existing_df
+    else:
+        df = new_df
+
     df = df.drop_duplicates(subset="timestamp").sort_values("timestamp").reset_index(drop=True)
 
-    out_path = RAW_DIR / f"{code}_precip.csv"
     df.to_csv(out_path, index=False)
     print(f"  ✓ {len(df)} points → {out_path.name}")
     print(f"    Plage: {df['timestamp'].min()} → {df['timestamp'].max()}")
@@ -112,15 +155,17 @@ def main():
     parser = argparse.ArgumentParser(description="Collecte des précipitations Open-Meteo")
     parser.add_argument("--start", default=COLLECT_START_DATE, help="Date de début (YYYY-MM-DD)")
     parser.add_argument("--end", default=COLLECT_END_DATE, help="Date de fin (YYYY-MM-DD)")
+    parser.add_argument("--full", action="store_true", help="Collecte complète (ignore les CSV existants)")
     args = parser.parse_args()
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"Collecte Open-Meteo : {args.start} → {args.end}")
+    mode = "complète" if args.full else "incrémentale"
+    print(f"Collecte Open-Meteo ({mode}) : {args.start} → {args.end}")
     print(f"Stations : {len(STATIONS)}")
 
     for station in STATIONS:
-        collect_station_meteo(station, args.start, args.end)
+        collect_station_meteo(station, args.start, args.end, full=args.full)
 
     print("\n✓ Collecte météo terminée.")
 

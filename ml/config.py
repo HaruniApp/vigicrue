@@ -1,5 +1,6 @@
 """Configuration partagée pour le pipeline ML Vigicrue."""
 
+from datetime import date
 from pathlib import Path
 
 # --- Chemins ---
@@ -110,7 +111,7 @@ STATION_INDEX = {s["code"]: i for i, s in enumerate(STATIONS)}
 
 # --- Paramètres de collecte ---
 COLLECT_START_DATE = "2000-01-01"
-COLLECT_END_DATE = "2025-02-01"
+COLLECT_END_DATE = date.today().strftime("%Y-%m-%d")
 
 # --- Paramètres du dataset ---
 INPUT_WINDOW_HOURS = 72       # fenêtre d'entrée par défaut (heures)
