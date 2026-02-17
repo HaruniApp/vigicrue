@@ -169,27 +169,29 @@ def add_static_spatial_features(df: pd.DataFrame, norm_params: dict) -> tuple[pd
     max_dist = max(abs(v) for v in RIVER_DISTANCES_KM.values())
     barrage_codes = {s["code"] for s in STATIONS if s.get("barrage")}
 
+    n = len(df)
+    new_cols = {}
     for code in STATION_CODES:
         dist_norm = RIVER_DISTANCES_KM[code] / max_dist  # [-1, 1]
         is_upstream = 1.0 if RIVER_DISTANCES_KM[code] > 0 else 0.0
         is_barrage = 1.0 if code in barrage_codes else 0.0
         branch = STATION_BRANCH[code]
 
-        n = len(df)
-        df[f"{code}_dist_to_target"] = dist_norm
+        new_cols[f"{code}_dist_to_target"] = np.full(n, dist_norm)
         norm_params[f"{code}_dist_to_target"] = {"min": -1.0, "max": 1.0}
 
-        df[f"{code}_is_upstream"] = is_upstream
+        new_cols[f"{code}_is_upstream"] = np.full(n, is_upstream)
         norm_params[f"{code}_is_upstream"] = {"min": 0.0, "max": 1.0}
 
-        df[f"{code}_is_barrage"] = is_barrage
+        new_cols[f"{code}_is_barrage"] = np.full(n, is_barrage)
         norm_params[f"{code}_is_barrage"] = {"min": 0.0, "max": 1.0}
 
         for b in RIVER_BRANCHES:
             col = f"{code}_branch_{b}"
-            df[col] = 1.0 if branch == b else 0.0
+            new_cols[col] = np.full(n, 1.0 if branch == b else 0.0)
             norm_params[col] = {"min": 0.0, "max": 1.0}
 
+    df = pd.concat([df, pd.DataFrame(new_cols, index=df.index)], axis=1)
     return df, norm_params
 
 
