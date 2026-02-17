@@ -1,12 +1,7 @@
-"""Temporal Fusion Transformer (TFT) pour la prédiction de crues.
+"""Temporal Fusion Transformer (TFT) simplifié pour la prédiction de crues.
 
-Le TFT est le state-of-the-art pour les séries temporelles multi-variées.
-Il gère nativement :
-- Les variables statiques (position amont/aval, rivière)
-- Les variables temporelles connues dans le futur (heure, jour de l'année)
-- L'attention interprétable (quelles stations/variables comptent le plus)
-
-Utilise pytorch-forecasting qui fournit une implémentation optimisée du TFT.
+LSTM encoder + Multi-Head Self-Attention + dense decoder.
+Suréchantillonnage des crues + loss pondérée pour réduire le biais en crue.
 
 Usage:
     python train_tft.py
@@ -18,65 +13,18 @@ import json
 import warnings
 
 import numpy as np
-import pandas as pd
-import pytorch_lightning as pl
 import torch
-from pytorch_forecasting import (
-    TemporalFusionTransformer,
-    TimeSeriesDataSet,
-)
-from pytorch_forecasting.metrics import MAE, RMSE, MultiLoss
 
 from config import (
     CHECKPOINTS_DIR,
     EPOCHS,
     FORECAST_HORIZONS,
-    INPUT_WINDOW_HOURS,
     LEARNING_RATE,
     PATIENCE,
     PROCESSED_DIR,
-    RAW_DIR,
-    STATION_CODES,
-    STATIONS,
-    TARGET_STATION,
-    TRAIN_END,
-    VAL_END,
 )
 
 warnings.filterwarnings("ignore", category=UserWarning)
-
-
-def build_tft_dataframe() -> pd.DataFrame:
-    """Construit le DataFrame au format pytorch-forecasting.
-
-    Le TFT attend un format long (une ligne par timestep par série),
-    mais ici on prédit une seule station cible, donc on utilise le format
-    avec toutes les features en colonnes.
-    """
-    # Charger le dataset normalisé (avant fenêtrage)
-    # On reconstruit depuis les données brutes normalisées
-    norm_params_path = PROCESSED_DIR / "norm_params.json"
-    feature_names_path = PROCESSED_DIR / "feature_names.json"
-
-    if not norm_params_path.exists():
-        raise FileNotFoundError("Lancer prepare_dataset.py d'abord")
-
-    with open(feature_names_path) as f:
-        feature_names = json.load(f)
-
-    # Charger les arrays et reconstruire le DataFrame
-    # On utilise les données fenêtrées pour le split, mais le TFT
-    # a besoin du format séquentiel
-    X_train = np.load(PROCESSED_DIR / "X_train.npy")
-    y_train = np.load(PROCESSED_DIR / "y_train.npy")
-    ts_train = np.load(PROCESSED_DIR / "ts_train.npy")
-    X_val = np.load(PROCESSED_DIR / "X_val.npy")
-    y_val = np.load(PROCESSED_DIR / "y_val.npy")
-    ts_val = np.load(PROCESSED_DIR / "ts_val.npy")
-
-    print(f"Train: {X_train.shape}, Val: {X_val.shape}")
-
-    return X_train, y_train, ts_train, X_val, y_val, ts_val, feature_names
 
 
 def main():
@@ -96,8 +44,8 @@ def main():
     # déjà fenêtrées, en wrappant dans un modèle PyTorch classique.
 
     print("Chargement des données...")
-    X_train = torch.from_numpy(np.load(PROCESSED_DIR / "X_train.npy"))
-    y_train = torch.from_numpy(np.load(PROCESSED_DIR / "y_train.npy"))
+    X_train_np = np.load(PROCESSED_DIR / "X_train.npy")
+    y_train_np = np.load(PROCESSED_DIR / "y_train.npy")
     X_val = torch.from_numpy(np.load(PROCESSED_DIR / "X_val.npy"))
     y_val = torch.from_numpy(np.load(PROCESSED_DIR / "y_val.npy"))
     X_test = torch.from_numpy(np.load(PROCESSED_DIR / "X_test.npy"))
@@ -106,11 +54,71 @@ def main():
     with open(PROCESSED_DIR / "metadata.json") as f:
         meta = json.load(f)
 
+    with open(PROCESSED_DIR / "norm_params.json") as f:
+        norm_params = json.load(f)
+
     n_features = meta["n_features"]
     n_horizons = len(meta["forecast_horizons"])
     input_window = meta["input_window"]
+    target_col = f"{meta['target_station']}_h"
+    target_idx = meta["feature_names"].index(target_col)
+    np_t = norm_params[target_col]
+    t_min, t_max = np_t["min"], np_t["max"]
+    t_range = t_max - t_min
 
     print(f"Features: {n_features}, Window: {input_window}, Horizons: {n_horizons}")
+
+    # --- Suréchantillonnage des crues ---
+    # H normalisé au dernier timestep de chaque fenêtre
+    h_last_norm = X_train_np[:, -1, target_idx]
+    h_last_mm = h_last_norm * t_range + t_min
+
+    # Seuils de suréchantillonnage (en mm)
+    FLOOD_THRESHOLD_1 = 800   # crue modérée → x2
+    FLOOD_THRESHOLD_2 = 1200  # crue forte → x4
+    FLOOD_THRESHOLD_3 = 1500  # crue majeure → x8
+
+    mask_1 = (h_last_mm >= FLOOD_THRESHOLD_1) & (h_last_mm < FLOOD_THRESHOLD_2)
+    mask_2 = (h_last_mm >= FLOOD_THRESHOLD_2) & (h_last_mm < FLOOD_THRESHOLD_3)
+    mask_3 = h_last_mm >= FLOOD_THRESHOLD_3
+
+    n1, n2, n3 = mask_1.sum(), mask_2.sum(), mask_3.sum()
+    print(f"\nSuréchantillonnage crues:")
+    print(f"  H >= {FLOOD_THRESHOLD_1}mm: {n1} samples → x2 = +{n1}")
+    print(f"  H >= {FLOOD_THRESHOLD_2}mm: {n2} samples → x4 = +{n2 * 3}")
+    print(f"  H >= {FLOOD_THRESHOLD_3}mm: {n3} samples → x8 = +{n3 * 7}")
+
+    # Dupliquer les échantillons de crue
+    extra_X = []
+    extra_y = []
+    if n1 > 0:
+        extra_X.append(X_train_np[mask_1])          # x1 extra → total x2
+        extra_y.append(y_train_np[mask_1])
+    if n2 > 0:
+        for _ in range(3):                           # x3 extra → total x4
+            extra_X.append(X_train_np[mask_2])
+            extra_y.append(y_train_np[mask_2])
+    if n3 > 0:
+        for _ in range(7):                           # x7 extra → total x8
+            extra_X.append(X_train_np[mask_3])
+            extra_y.append(y_train_np[mask_3])
+
+    if extra_X:
+        X_train_np = np.concatenate([X_train_np] + extra_X)
+        y_train_np = np.concatenate([y_train_np] + extra_y)
+        print(f"  Dataset train: {len(X_train_np)} samples (après suréchantillonnage)")
+
+    X_train = torch.from_numpy(X_train_np)
+    y_train = torch.from_numpy(y_train_np)
+
+    # --- Poids par échantillon pour loss pondérée ---
+    # Plus le H cible est élevé, plus le poids est important
+    h_last_norm_train = X_train_np[:, -1, target_idx]
+    h_last_mm_train = h_last_norm_train * t_range + t_min
+    # Poids = 1 + (H_mm / 1000)^2 → H=0: w=1, H=1000: w=2, H=2000: w=5
+    sample_weights = torch.from_numpy(
+        (1.0 + (np.maximum(h_last_mm_train, 0) / 1000.0) ** 2).astype(np.float32)
+    )
 
     # Device
     if torch.cuda.is_available():
@@ -135,7 +143,7 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print(f"Paramètres: {total_params:,}")
 
-    train_ds = torch.utils.data.TensorDataset(X_train, y_train)
+    train_ds = torch.utils.data.TensorDataset(X_train, y_train, sample_weights)
     val_ds = torch.utils.data.TensorDataset(X_val, y_val)
     test_ds = torch.utils.data.TensorDataset(X_test, y_test)
 
@@ -145,7 +153,6 @@ def main():
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=5, factor=0.5)
-    criterion = torch.nn.MSELoss()
 
     best_val_loss = float("inf")
     patience_counter = 0
@@ -155,14 +162,17 @@ def main():
     print("-" * 44)
 
     for epoch in range(1, args.epochs + 1):
-        # Train
+        # Train (weighted MSE: samples with high H count more)
         model.train()
         train_loss = 0.0
         n = 0
-        for X_b, y_b in train_loader:
-            X_b, y_b = X_b.to(device), y_b.to(device)
+        for X_b, y_b, w_b in train_loader:
+            X_b, y_b, w_b = X_b.to(device), y_b.to(device), w_b.to(device)
             optimizer.zero_grad()
-            loss = criterion(model(X_b), y_b)
+            pred = model(X_b)
+            # Weighted MSE: (pred - target)^2 * weight, averaged
+            per_sample_loss = ((pred - y_b) ** 2).mean(dim=1)  # mean over horizons
+            loss = (per_sample_loss * w_b).mean()
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -177,7 +187,7 @@ def main():
         with torch.no_grad():
             for X_b, y_b in val_loader:
                 X_b, y_b = X_b.to(device), y_b.to(device)
-                val_loss += criterion(model(X_b), y_b).item()
+                val_loss += torch.nn.functional.mse_loss(model(X_b), y_b).item()
                 nv += 1
         val_loss /= nv
 
