@@ -11,9 +11,9 @@ function formatDate(date) {
 }
 
 function defaultDates() {
-  const end = new Date();
   const start = new Date();
-  start.setDate(start.getDate() - 7);
+  const end = new Date();
+  end.setDate(end.getDate() + 1);
   return {
     start: start.toISOString().slice(0, 10),
     end: end.toISOString().slice(0, 10),
