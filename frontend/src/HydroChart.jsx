@@ -371,7 +371,7 @@ export default function HydroChart(props) {
   const axisLabelFont = '12px "Inter", -apple-system, BlinkMacSystemFont, sans-serif';
   const yAxisSize = 60;
 
-  const precipBars = uPlot.paths.bars({ size: [0.8, Infinity, 1] });
+  const precipBars = uPlot.paths.bars({ size: [0.8, Infinity, 0] });
 
   const precipSeries = [
     {},
