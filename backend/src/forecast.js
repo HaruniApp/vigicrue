@@ -347,14 +347,24 @@ export async function forecast(stationId) {
     }
   }
 
+  // Static spatial features: already in final form (added after normalization in training)
+  const staticFeatureSuffixes = ['_dist_to_target', '_is_upstream', '_is_barrage',
+    '_branch_vilaine', '_branch_valiere', '_branch_cantache', '_branch_veuvre'];
+  const staticFeatures = new Set();
+  for (const code of STATION_CODES) {
+    for (const suffix of staticFeatureSuffixes) {
+      staticFeatures.add(`${code}${suffix}`);
+    }
+  }
+
   // Build tensor: shape (1, 72, n_features), ordered by feature_names
   const tensorData = new Float32Array(inputWindow * meta.n_features);
   for (let t = 0; t < inputWindow; t++) {
     for (let f = 0; f < meta.feature_names.length; f++) {
       const fname = meta.feature_names[f];
       const raw = featureMap[fname]?.[t] ?? 0;
-      const np = normParams[fname];
-      const normalized = normalize(raw, np?.min, np?.max);
+      // Static features are not normalized (inserted after normalization in training)
+      const normalized = staticFeatures.has(fname) ? raw : normalize(raw, normParams[fname]?.min, normParams[fname]?.max);
       tensorData[t * meta.n_features + f] = normalized;
     }
   }

@@ -235,13 +235,21 @@ def main():
         feature_map["doy_sin"] = doy_sin
         feature_map["doy_cos"] = doy_cos
 
+        # Static spatial features: already in final form (added after normalization in training)
+        static_suffixes = ("_dist_to_target", "_is_upstream", "_is_barrage",
+                           "_branch_vilaine", "_branch_valiere", "_branch_cantache", "_branch_veuvre")
+        static_features = {f"{code}{s}" for code in STATION_CODES for s in static_suffixes}
+
         # Build tensor
         tensor = np.zeros((1, input_window, meta["n_features"]), dtype=np.float32)
         for t in range(input_window):
             for f_idx, fname in enumerate(meta["feature_names"]):
                 raw = (feature_map.get(fname) or [0] * input_window)[t] or 0
-                np_f = norm_params.get(fname, {})
-                tensor[0, t, f_idx] = normalize(raw, np_f.get("min"), np_f.get("max"))
+                if fname in static_features:
+                    tensor[0, t, f_idx] = raw
+                else:
+                    np_f = norm_params.get(fname, {})
+                    tensor[0, t, f_idx] = normalize(raw, np_f.get("min"), np_f.get("max"))
 
         # Show target H at last timestep
         target_idx = meta["feature_names"].index(target_col)
