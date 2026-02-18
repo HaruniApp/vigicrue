@@ -123,7 +123,7 @@ COLLECT_END_DATE = date.today().strftime("%Y-%m-%d")
 # --- Paramètres du dataset ---
 INPUT_WINDOW_HOURS = 72       # fenêtre d'entrée par défaut (heures)
 FORECAST_HORIZONS = [1, 3, 6, 12, 24]  # horizons de prédiction (heures)
-FUTURE_PRECIP_HOURS = 6                # heures de précipitations futures
+FUTURE_PRECIP_HOURS = 24               # heures de précipitations futures
 
 # --- Paramètres d'entraînement ---
 TRAIN_END = "2023-12-31"
