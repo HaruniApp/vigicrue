@@ -1,7 +1,7 @@
 import { createMemo, Show, For } from 'solid-js';
 import uPlot from 'uplot';
 import { SolidUplot, createPluginBus } from '@dschz/solid-uplot';
-import { cursor, tooltip, focusSeries } from '@dschz/solid-uplot/plugins';
+import { cursor, tooltip } from '@dschz/solid-uplot/plugins';
 
 function Tooltip(props) {
   const idx = () => props.cursor.idx;
@@ -276,7 +276,7 @@ export default function HydroChart(props) {
 
   const plugins = [
     cursor(),
-    focusSeries({ pxThreshold: 15 }),
+
     tooltip(Tooltip, { placement: "top-right", zIndex: 20 }),
     createThresholdsPlugin(() => thresholds()),
   ];
@@ -420,7 +420,7 @@ export default function HydroChart(props) {
 
   const precipPlugins = [
     cursor(),
-    focusSeries({ pxThreshold: 15 }),
+
     tooltip(PrecipTooltip, { placement: "top-right", zIndex: 20 }),
   ];
 
