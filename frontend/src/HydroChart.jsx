@@ -128,25 +128,38 @@ function createThresholdsPlugin(getThresholds) {
   };
 }
 
-function buildPrecipData(forecast) {
-  if (!forecast?.precip?.length) return null;
+function buildPrecipData(forecast, mainTimestamps) {
+  if (!forecast?.precip?.length || !mainTimestamps?.length) return null;
+
+  const mainStart = mainTimestamps[0];
+  const mainEnd = mainTimestamps[mainTimestamps.length - 1];
+  // Round to hour boundaries to keep uniform 3600s gaps
+  const hourStart = Math.floor(mainStart / 3600) * 3600;
+  const hourEnd = Math.ceil(mainEnd / 3600) * 3600;
 
   const timestamps = [];
   const valuesPast = [];
   const valuesFuture = [];
 
+  // Build a map of all precip values by timestamp
+  const pastMap = new Map();
+  const futureMap = new Map();
   for (const p of forecast.precip) {
-    timestamps.push(Math.floor(new Date(p.t).getTime() / 1000));
-    valuesPast.push(p.v ?? 0);
-    valuesFuture.push(null);
+    pastMap.set(Math.floor(new Date(p.t).getTime() / 1000), p.v ?? 0);
   }
-
   if (forecast.precipFuture?.length) {
     for (const p of forecast.precipFuture) {
-      timestamps.push(Math.floor(new Date(p.t).getTime() / 1000));
-      valuesPast.push(null);
-      valuesFuture.push(p.v ?? 0);
+      futureMap.set(Math.floor(new Date(p.t).getTime() / 1000), p.v ?? 0);
     }
+  }
+
+  // Fill hourly grid covering the full chart range
+  for (let ts = hourStart; ts <= hourEnd; ts += 3600) {
+    timestamps.push(ts);
+    const pv = pastMap.get(ts);
+    const fv = futureMap.get(ts);
+    valuesPast.push(pv != null ? pv : null);
+    valuesFuture.push(fv != null ? fv : null);
   }
 
   return [timestamps, valuesPast, valuesFuture];
@@ -244,7 +257,7 @@ export default function HydroChart(props) {
   const bus = createPluginBus();
 
   const chartData = createMemo(() => buildData(props.dataH, props.dataQ, props.forecast));
-  const precipData = createMemo(() => buildPrecipData(props.forecast));
+  const precipData = createMemo(() => buildPrecipData(props.forecast, chartData()[0]));
 
   const thresholds = createMemo(() => extractThresholds(props.dataH));
 
@@ -369,14 +382,7 @@ export default function HydroChart(props) {
   ];
 
   const precipScales = {
-    x: {
-      time: true,
-      range: (u, min, max) => {
-        const ts = chartData()[0];
-        if (ts.length > 0) return [ts[0], ts[ts.length - 1]];
-        return [min, max];
-      },
-    },
+    x: { time: true },
     P: { auto: true, range: (u, min, max) => [0, Math.max(max * 1.1, 0.5)] },
   };
 
