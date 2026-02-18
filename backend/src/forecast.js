@@ -2,6 +2,9 @@ import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { cachedFetch } from './cache.js';
+
+const TTL_30MIN = 30 * 60 * 1000;
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const MODELS_DIR = join(__dirname, '..', 'models');
@@ -97,20 +100,19 @@ async function fetchHydroSeries(stationId, startAt, endAt, variable) {
 
   const url = `https://www.hydro.eaufrance.fr/stationhydro/ajax/${stationId}/series?${params}`;
   try {
-    const response = await fetch(url, {
+    const data = await cachedFetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json, text/javascript, */*; q=0.01',
         'Referer': `https://www.hydro.eaufrance.fr/stationhydro/${stationId}/series`,
         'X-Requested-With': 'XMLHttpRequest',
       },
-    });
+    }, TTL_30MIN);
 
-    if (!response.ok) {
-      console.warn(`  Hydro ${stationId} ${variable}: HTTP ${response.status}`);
+    if (!data) {
+      console.warn(`  Hydro ${stationId} ${variable}: API error`);
       return [];
     }
-    const data = await response.json();
     const points = data?.series?.data ?? [];
     console.log(`  Hydro ${stationId} ${variable}: ${points.length} pts`);
     return points;
@@ -122,9 +124,8 @@ async function fetchHydroSeries(stationId, startAt, endAt, variable) {
 
 async function fetchPrecipitation(lat, lon, pastHours) {
   const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&past_hours=${pastHours}&forecast_hours=0&hourly=precipitation&timezone=Europe%2FParis`;
-  const response = await fetch(url);
-  if (!response.ok) return [];
-  const data = await response.json();
+  const data = await cachedFetch(url, {}, TTL_30MIN);
+  if (!data) return [];
   const times = data?.hourly?.time ?? [];
   const precip = data?.hourly?.precipitation ?? [];
   return times.map((t, i) => ({ t, v: precip[i] ?? 0 }));
@@ -397,6 +398,12 @@ export async function forecast(stationId) {
     console.log(`  ${fname}: raw=${raw} → norm=${norm.toFixed(6)}`);
   }
   // --- END DEBUG ---
+
+  // Dump tensor for cross-runtime comparison
+  const { writeFile } = await import('fs/promises');
+  const tensorPath = join(__dirname, '..', 'models', 'debug_tensor.json');
+  await writeFile(tensorPath, JSON.stringify(Array.from(tensorData)));
+  console.log(`\nTensor dumped → ${tensorPath} (${tensorData.length} floats)`);
 
   const ort = await import('onnxruntime-node');
   const inputTensor = new ort.Tensor('float32', tensorData, [1, inputWindow, meta.n_features]);

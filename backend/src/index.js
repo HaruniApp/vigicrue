@@ -1,6 +1,9 @@
 import express from 'express';
 import cors from 'cors';
 import { forecast } from './forecast.js';
+import { cachedFetch } from './cache.js';
+
+const TTL_30MIN = 30 * 60 * 1000;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -23,20 +26,19 @@ app.get('/api/station/:stationId/series', async (req, res) => {
   const url = `https://www.hydro.eaufrance.fr/stationhydro/ajax/${stationId}/series?${params}`;
 
   try {
-    const response = await fetch(url, {
+    const data = await cachedFetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json, text/javascript, */*; q=0.01',
         'Referer': `https://www.hydro.eaufrance.fr/stationhydro/${stationId}/series`,
         'X-Requested-With': 'XMLHttpRequest',
       },
-    });
+    }, TTL_30MIN);
 
-    if (!response.ok) {
-      return res.status(response.status).json({ error: `API returned ${response.status}` });
+    if (!data) {
+      return res.status(502).json({ error: 'API returned an error' });
     }
 
-    const data = await response.json();
     res.json(data);
   } catch (err) {
     console.error('Proxy error:', err.message);
