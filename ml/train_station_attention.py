@@ -529,6 +529,26 @@ def main():
     with open(CHECKPOINTS_DIR / "station_attn_results.json", "w") as f:
         json.dump(results, f, indent=2)
 
+    # Build RMSE dict per station/horizon (from test set) for confidence intervals
+    rmse_per_station = {}
+    for code in STATION_CODES:
+        rmse_h = []
+        for h in FORECAST_HORIZONS:
+            key = f"{code}_H_t+{h}h"
+            rmse_h.append(results["test"][key]["rmse"])
+        entry = {"h": rmse_h}
+
+        # Q if available
+        om = meta["output_map"][code]
+        if "q_start" in om:
+            rmse_q = []
+            for h in FORECAST_HORIZONS:
+                key = f"{code}_Q_t+{h}h"
+                rmse_q.append(results["test"][key]["rmse"])
+            entry["q"] = rmse_q
+
+        rmse_per_station[code] = entry
+
     model_config = {
         "n_stations": n_stations,
         "vars_per_station": VARS_PER_STATION,
@@ -542,6 +562,7 @@ def main():
         "stations_with_q_indices": stations_with_q_indices,
         "n_outputs": n_outputs,
         "n_features": n_features,
+        "rmse": rmse_per_station,
     }
     with open(CHECKPOINTS_DIR / "station_attn_config.json", "w") as f:
         json.dump(model_config, f, indent=2)

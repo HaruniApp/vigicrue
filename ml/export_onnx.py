@@ -119,6 +119,7 @@ def export_to_onnx(model: torch.nn.Module, config: dict) -> str:
         "output_map": meta["output_map"],
         "feature_names": meta["feature_names"],
         "target_mode": meta.get("target_mode", "delta"),
+        "rmse": config.get("rmse", {}),
     }
     meta_path = ONNX_DIR / "station_attn_meta.json"
     with open(meta_path, "w") as f:

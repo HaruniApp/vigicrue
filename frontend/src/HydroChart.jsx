@@ -23,7 +23,7 @@ function Tooltip(props) {
         {(series) => {
           const value = () => props.u.data[series.seriesIdx]?.[idx()];
           return (
-            <Show when={series.visible && value() != null}>
+            <Show when={series.visible && value() != null && !series.label.startsWith("CI ")}>
               <div style={{ color: series.stroke }}>
                 {series.label}: {value()?.toFixed(2)}
               </div>
@@ -134,27 +134,35 @@ function buildData(dataH, dataQ, forecast) {
     }
   }
 
-  // Build forecast series (H + Q)
+  // Build forecast series (H + Q) + confidence interval series
   const valuesForecastH = new Array(timestamps.length).fill(null);
   const valuesForecastQ = new Array(timestamps.length).fill(null);
+  const ciHLow = new Array(timestamps.length).fill(null);
+  const ciHHigh = new Array(timestamps.length).fill(null);
+  const ciQLow = new Array(timestamps.length).fill(null);
+  const ciQHigh = new Array(timestamps.length).fill(null);
 
   if (forecast?.forecasts?.length && timestamps.length > 0) {
     // Start with the last observed values for visual continuity
     const lastHVal = valuesH[valuesH.length - 1];
     if (lastHVal != null) {
       valuesForecastH[valuesForecastH.length - 1] = lastHVal;
+      ciHLow[ciHLow.length - 1] = lastHVal;
+      ciHHigh[ciHHigh.length - 1] = lastHVal;
     }
     const lastQVal = valuesQ[valuesQ.length - 1];
     if (lastQVal != null) {
       valuesForecastQ[valuesForecastQ.length - 1] = lastQVal;
+      ciQLow[ciQLow.length - 1] = lastQVal;
+      ciQHigh[ciQHigh.length - 1] = lastQVal;
     }
 
-    // Build Q forecast map
+    // Build Q forecast map (with CI)
     const qForecastMap = new Map();
     if (forecast.forecastsQ?.length) {
       for (const f of forecast.forecastsQ) {
         const ts = Math.floor(new Date(f.t).getTime() / 1000);
-        qForecastMap.set(ts, f.v);
+        qForecastMap.set(ts, f);
       }
     }
 
@@ -165,11 +173,18 @@ function buildData(dataH, dataQ, forecast) {
       valuesH.push(null);
       valuesQ.push(null);
       valuesForecastH.push(f.v);
-      valuesForecastQ.push(qForecastMap.get(ts) ?? null);
+      ciHLow.push(f.v_lower ?? null);
+      ciHHigh.push(f.v_upper ?? null);
+
+      const qf = qForecastMap.get(ts);
+      valuesForecastQ.push(qf?.v ?? null);
+      ciQLow.push(qf?.v_lower ?? null);
+      ciQHigh.push(qf?.v_upper ?? null);
     }
   }
 
-  return [timestamps, valuesH, valuesQ, valuesForecastH, valuesForecastQ];
+  return [timestamps, valuesH, valuesQ, valuesForecastH, valuesForecastQ,
+          ciHLow, ciHHigh, ciQLow, ciQHigh];
 }
 
 export default function HydroChart(props) {
@@ -222,6 +237,11 @@ export default function HydroChart(props) {
       scale: "Q",
       value: (u, v) => v == null ? "--" : v.toFixed(2),
     },
+    // CI series (hidden from legend/tooltip, visible for band fill)
+    { label: "CI H-", scale: "H", stroke: "transparent", width: 0, points: { show: false } },
+    { label: "CI H+", scale: "H", stroke: "transparent", width: 0, points: { show: false } },
+    { label: "CI Q-", scale: "Q", stroke: "transparent", width: 0, points: { show: false } },
+    { label: "CI Q+", scale: "Q", stroke: "transparent", width: 0, points: { show: false } },
   ];
 
   let hRangeRatio = 1;
@@ -258,6 +278,11 @@ export default function HydroChart(props) {
       },
     },
   };
+
+  const bands = [
+    { series: [6, 5], fill: "rgba(13, 148, 136, 0.15)" },   // teal H CI
+    { series: [8, 7], fill: "rgba(217, 119, 6, 0.15)" },     // amber Q CI
+  ];
 
   const tzDate = ts => uPlot.tzDate(new Date(ts * 1000), 'Europe/Paris');
 
@@ -324,6 +349,7 @@ export default function HydroChart(props) {
           series={series}
           scales={scales}
           axes={axes}
+          bands={bands}
           tzDate={tzDate}
           autoResize={true}
           plugins={plugins}
