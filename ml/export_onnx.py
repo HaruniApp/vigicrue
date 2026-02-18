@@ -86,8 +86,15 @@ def export_to_onnx(model: torch.nn.Module, config: dict, model_name: str) -> str
         opset_version=17,
     )
 
-    # Vérifier le modèle ONNX
-    onnx_model = onnx.load(str(onnx_path))
+    # Repack: intégrer les poids externes dans un seul fichier .onnx
+    # (onnxruntime-node ne charge pas toujours les .onnx.data correctement)
+    onnx_model = onnx.load(str(onnx_path), load_external_data=True)
+    onnx.save(onnx_model, str(onnx_path))
+    # Supprimer le fichier de données externe s'il existe
+    data_path = onnx_path.with_suffix(".onnx.data")
+    if data_path.exists():
+        data_path.unlink()
+        print(f"  Poids intégrés dans {onnx_path.name} (supprimé {data_path.name})")
     onnx.checker.check_model(onnx_model)
     print(f"✓ Modèle ONNX valide : {onnx_path}")
 
