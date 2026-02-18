@@ -3,6 +3,24 @@ import uPlot from 'uplot';
 import { SolidUplot, createPluginBus } from '@dschz/solid-uplot';
 import { cursor, tooltip } from '@dschz/solid-uplot/plugins';
 
+function parsePrecipMaps(forecast) {
+  if (!forecast?.precip?.length) return null;
+  const pastMap = new Map();
+  const futureMap = new Map();
+  for (const p of forecast.precip) {
+    pastMap.set(Math.floor(new Date(p.t).getTime() / 1000), p.v ?? 0);
+  }
+  if (forecast.precipFuture?.length) {
+    for (const p of forecast.precipFuture) {
+      futureMap.set(Math.floor(new Date(p.t).getTime() / 1000), p.v ?? 0);
+    }
+  }
+  let maxVal = 0.5;
+  for (const v of pastMap.values()) if (v > maxVal) maxVal = v;
+  for (const v of futureMap.values()) if (v > maxVal) maxVal = v;
+  return { pastMap, futureMap, maxVal };
+}
+
 function Tooltip(props) {
   const idx = () => props.cursor.idx;
   return (
@@ -31,35 +49,20 @@ function Tooltip(props) {
           );
         }}
       </For>
-    </div>
-  );
-}
-
-function PrecipTooltip(props) {
-  const idx = () => props.cursor.idx;
-  return (
-    <div style={{
-      background: "rgba(255,255,255,0.92)",
-      "backdrop-filter": "blur(8px)",
-      "-webkit-backdrop-filter": "blur(8px)",
-      padding: "8px 12px",
-      border: "none",
-      "border-radius": "10px",
-      "font-size": "13px",
-      "box-shadow": "0 4px 20px rgba(0,0,0,0.1)",
-    }}>
-      <For each={props.seriesData}>
-        {(series) => {
-          const value = () => props.u.data[series.seriesIdx]?.[idx()];
-          return (
-            <Show when={series.visible && value() != null}>
-              <div style={{ color: series.stroke }}>
-                {series.label}: {value()?.toFixed(1)} mm/h
-              </div>
-            </Show>
-          );
-        }}
-      </For>
+      <Show when={(() => {
+        const xVal = props.cursor.xValue;
+        if (xVal == null) return null;
+        const hourTs = Math.floor(xVal / 3600) * 3600;
+        const precip = props.u?._precipMaps;
+        if (!precip) return null;
+        const pv = precip.pastMap.get(hourTs);
+        const fv = precip.futureMap.get(hourTs);
+        if (pv != null && pv > 0) return { label: "Précip.", value: pv, color: "#60a5fa" };
+        if (fv != null && fv > 0) return { label: "Précip. (prév.)", value: fv, color: "#93c5fd" };
+        return null;
+      })()}>
+        {(p) => <div style={{ color: p().color }}>{p().label}: {p().value.toFixed(1)} mm/h</div>}
+      </Show>
     </div>
   );
 }
@@ -91,8 +94,6 @@ function createThresholdsPlugin(getThresholds) {
           const ctx = u.ctx;
           const { left, top, width, height } = u.bbox;
           const dpr = devicePixelRatio;
-          const fontSize = 11 * dpr;
-          const lineHeight = fontSize + 2 * dpr;
 
           ctx.save();
           ctx.beginPath();
@@ -128,41 +129,54 @@ function createThresholdsPlugin(getThresholds) {
   };
 }
 
-function buildPrecipData(forecast, mainTimestamps) {
-  if (!forecast?.precip?.length || !mainTimestamps?.length) return null;
+function createPrecipPlugin(getPrecipMaps) {
+  return {
+    hooks: {
+      draw: [(u) => {
+        const precip = getPrecipMaps();
+        if (!precip) return;
 
-  const mainStart = mainTimestamps[0];
-  const mainEnd = mainTimestamps[mainTimestamps.length - 1];
-  // Round to hour boundaries to keep uniform 3600s gaps
-  const hourStart = Math.floor(mainStart / 3600) * 3600;
-  const hourEnd = Math.ceil(mainEnd / 3600) * 3600;
+        // Attach to uPlot instance so tooltip can read it
+        u._precipMaps = precip;
 
-  const timestamps = [];
-  const valuesPast = [];
-  const valuesFuture = [];
+        const ctx = u.ctx;
+        const { left, top, width, height } = u.bbox;
+        const dpr = devicePixelRatio;
+        const barMaxHeight = 50 * dpr;
+        const barBottom = top + height;
 
-  // Build a map of all precip values by timestamp
-  const pastMap = new Map();
-  const futureMap = new Map();
-  for (const p of forecast.precip) {
-    pastMap.set(Math.floor(new Date(p.t).getTime() / 1000), p.v ?? 0);
-  }
-  if (forecast.precipFuture?.length) {
-    for (const p of forecast.precipFuture) {
-      futureMap.set(Math.floor(new Date(p.t).getTime() / 1000), p.v ?? 0);
-    }
-  }
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(left, top, width, height);
+        ctx.clip();
 
-  // Fill hourly grid covering the full chart range
-  for (let ts = hourStart; ts <= hourEnd; ts += 3600) {
-    timestamps.push(ts);
-    const pv = pastMap.get(ts);
-    const fv = futureMap.get(ts);
-    valuesPast.push(pv != null ? pv : null);
-    valuesFuture.push(fv != null ? fv : null);
-  }
+        const drawBars = (map, color) => {
+          ctx.fillStyle = color;
+          for (const [ts, v] of map) {
+            if (v <= 0) continue;
+            const x = u.valToPos(ts, 'x', true);
+            const x2 = u.valToPos(ts + 3600, 'x', true);
+            if (x2 < left || x > left + width) continue;
+            const barW = Math.max(x2 - x - dpr, 1);
+            const barH = (v / precip.maxVal) * barMaxHeight;
+            ctx.fillRect(x, barBottom - barH, barW, barH);
+          }
+        };
 
-  return [timestamps, valuesPast, valuesFuture];
+        drawBars(precip.pastMap, "rgba(96, 165, 250, 0.5)");
+        drawBars(precip.futureMap, "rgba(147, 197, 253, 0.45)");
+
+        // Small axis label
+        ctx.fillStyle = "#60a5fa";
+        ctx.font = `${10 * dpr}px "Inter", sans-serif`;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "bottom";
+        ctx.fillText(`↑ max ${precip.maxVal.toFixed(1)} mm/h`, left + 4 * dpr, barBottom - 2 * dpr);
+
+        ctx.restore();
+      }],
+    },
+  };
 }
 
 function buildData(dataH, dataQ, forecast) {
@@ -255,9 +269,8 @@ function buildData(dataH, dataQ, forecast) {
 
 export default function HydroChart(props) {
   const bus = createPluginBus();
-
   const chartData = createMemo(() => buildData(props.dataH, props.dataQ, props.forecast));
-  const precipData = createMemo(() => buildPrecipData(props.forecast, chartData()[0]));
+  const precipMaps = createMemo(() => parsePrecipMaps(props.forecast));
 
   const thresholds = createMemo(() => extractThresholds(props.dataH));
 
@@ -268,9 +281,9 @@ export default function HydroChart(props) {
 
   const plugins = [
     cursor(),
-
     tooltip(Tooltip, { placement: "top-right", zIndex: 20 }),
     createThresholdsPlugin(() => thresholds()),
+    createPrecipPlugin(() => precipMaps()),
   ];
 
   const series = [
@@ -312,6 +325,8 @@ export default function HydroChart(props) {
   ];
 
   let hRangeRatio = 1;
+
+  const yAxisSize = 60;
 
   const scales = {
     x: { time: true },
@@ -355,66 +370,6 @@ export default function HydroChart(props) {
 
   const axisFont = '12px "Inter", -apple-system, BlinkMacSystemFont, sans-serif';
   const axisLabelFont = '12px "Inter", -apple-system, BlinkMacSystemFont, sans-serif';
-  const yAxisSize = 60;
-
-  const precipBars = uPlot.paths.bars({ size: [0.8, Infinity, 0] });
-
-  const precipSeries = [
-    {},
-    {
-      label: "Précip. passée",
-      scale: "P",
-      fill: "rgba(96, 165, 250, 0.7)",
-      stroke: "rgba(96, 165, 250, 0.7)",
-      width: 0,
-      paths: precipBars,
-      points: { show: false },
-    },
-    {
-      label: "Précip. future",
-      scale: "P",
-      fill: "rgba(147, 197, 253, 0.5)",
-      stroke: "rgba(147, 197, 253, 0.5)",
-      width: 0,
-      paths: precipBars,
-      points: { show: false },
-    },
-  ];
-
-  const precipScales = {
-    x: { time: true },
-    P: { auto: true, range: (u, min, max) => [0, Math.max(max * 1.1, 0.5)] },
-  };
-
-  const precipAxes = [
-    { show: false },
-    {
-      scale: "P",
-      side: 3,
-      label: "mm/h",
-      labelFont: axisLabelFont,
-      font: axisFont,
-      stroke: "#60a5fa",
-      ticks: { stroke: "#e5e5ea", width: 1 },
-      grid: { show: true, stroke: "#f0f0f2", width: 1 },
-      size: yAxisSize,
-      values: (u, vals) => vals.map(v => v.toFixed(1)),
-    },
-    {
-      side: 1,
-      size: yAxisSize,
-      ticks: { show: false },
-      grid: { show: false },
-      values: () => [],
-      stroke: "transparent",
-    },
-  ];
-
-  const precipPlugins = [
-    cursor(),
-
-    tooltip(PrecipTooltip, { placement: "top-right", zIndex: 20 }),
-  ];
 
   const axes = [
     {
@@ -486,21 +441,6 @@ export default function HydroChart(props) {
           resetScales={true}
         />
       </div>
-      <Show when={precipData()}>
-        <div style={{ width: "100%", height: "100px", "margin-top": "0" }}>
-          <SolidUplot
-            data={precipData()}
-            series={precipSeries}
-            scales={precipScales}
-            axes={precipAxes}
-            tzDate={tzDate}
-            autoResize={true}
-            plugins={precipPlugins}
-            pluginBus={bus}
-            resetScales={true}
-          />
-        </div>
-      </Show>
       <Show when={thresholds()}>
         <div style={{ display: "flex", "flex-wrap": "wrap", "justify-content": "center", gap: "0.75rem 1.5rem", "margin-top": "0.5rem", "font-size": "12px" }}>
           <For each={thresholds()}>
