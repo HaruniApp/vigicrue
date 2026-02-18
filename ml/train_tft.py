@@ -250,7 +250,7 @@ def main():
                 ss_res = np.sum((true_abs_mm - pred_abs_mm) ** 2)
                 ss_tot = np.sum((true_abs_mm - np.mean(true_abs_mm)) ** 2)
                 nse = float(1.0 - ss_res / ss_tot) if ss_tot > 1e-10 else 0.0
-                results[split_key][f"t+{h}h"] = {"rmse_mm": rmse, "mae_mm": mae, "nse": nse}
+                results[split_key][f"t+{h}h"] = {"rmse": rmse, "mae": mae, "nse": nse}
                 print(f"  t+{h}h: NSE={nse:.4f}, RMSE={rmse:.1f}mm, MAE={mae:.1f}mm")
         else:
             for i, h in enumerate(FORECAST_HORIZONS):

@@ -81,11 +81,13 @@ def print_comparison(results: dict) -> None:
         for model in models:
             if horizon in results[model]:
                 m = results[model][horizon]["test"]
+                rmse = m.get("rmse") or m.get("rmse_mm", 0)
+                mae = m.get("mae") or m.get("mae_mm", 0)
                 if m["nse"] > best_nse:
                     best_nse = m["nse"]
                     best_model = model
                 marker = ""
-                print(f"  {model:<12} {m['nse']:>12.4f} {m['rmse']:>14.6f} {m['mae']:>13.6f}{marker}")
+                print(f"  {model:<12} {m['nse']:>12.4f} {rmse:>14.6f} {mae:>13.6f}{marker}")
 
         if best_model:
             print(f"  → Meilleur : {best_model}")
@@ -105,7 +107,10 @@ def plot_comparison(results: dict) -> None:
 
     for ax, metric, title in zip(axes, ["nse", "rmse", "mae"], ["NSE ↑", "RMSE ↓", "MAE ↓"]):
         for model in models:
-            values = [results[model][h]["test"][metric] for h in horizons]
+            values = [
+                results[model][h]["test"].get(metric) or results[model][h]["test"].get(f"{metric}_mm", 0)
+                for h in horizons
+            ]
             ax.plot(horizon_labels, values, "o-", label=model, color=colors.get(model, "#666"))
         ax.set_xlabel("Horizon")
         ax.set_ylabel(metric.upper())
