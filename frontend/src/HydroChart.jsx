@@ -128,46 +128,25 @@ function createThresholdsPlugin(getThresholds) {
   };
 }
 
-function buildPrecipData(forecast, mainTimestamps) {
-  if (!forecast?.precip?.length || !mainTimestamps?.length) return null;
-
-  const mainStart = mainTimestamps[0];
-  const mainEnd = mainTimestamps[mainTimestamps.length - 1];
+function buildPrecipData(forecast) {
+  if (!forecast?.precip?.length) return null;
 
   const timestamps = [];
   const valuesPast = [];
   const valuesFuture = [];
 
   for (const p of forecast.precip) {
-    const ts = Math.floor(new Date(p.t).getTime() / 1000);
-    if (ts < mainStart || ts > mainEnd) continue;
-    timestamps.push(ts);
+    timestamps.push(Math.floor(new Date(p.t).getTime() / 1000));
     valuesPast.push(p.v ?? 0);
     valuesFuture.push(null);
   }
 
   if (forecast.precipFuture?.length) {
     for (const p of forecast.precipFuture) {
-      const ts = Math.floor(new Date(p.t).getTime() / 1000);
-      if (ts > mainEnd) continue;
-      timestamps.push(ts);
+      timestamps.push(Math.floor(new Date(p.t).getTime() / 1000));
       valuesPast.push(null);
       valuesFuture.push(p.v ?? 0);
     }
-  }
-
-  if (timestamps.length === 0) return null;
-
-  // Pad to match main chart range exactly
-  if (timestamps[0] > mainStart) {
-    timestamps.unshift(mainStart);
-    valuesPast.unshift(null);
-    valuesFuture.unshift(null);
-  }
-  if (timestamps[timestamps.length - 1] < mainEnd) {
-    timestamps.push(mainEnd);
-    valuesPast.push(null);
-    valuesFuture.push(null);
   }
 
   return [timestamps, valuesPast, valuesFuture];
@@ -265,7 +244,7 @@ export default function HydroChart(props) {
   const bus = createPluginBus();
 
   const chartData = createMemo(() => buildData(props.dataH, props.dataQ, props.forecast));
-  const precipData = createMemo(() => buildPrecipData(props.forecast, chartData()[0]));
+  const precipData = createMemo(() => buildPrecipData(props.forecast));
 
   const thresholds = createMemo(() => extractThresholds(props.dataH));
 
@@ -390,7 +369,14 @@ export default function HydroChart(props) {
   ];
 
   const precipScales = {
-    x: { time: true },
+    x: {
+      time: true,
+      range: (u, min, max) => {
+        const ts = chartData()[0];
+        if (ts.length > 0) return [ts[0], ts[ts.length - 1]];
+        return [min, max];
+      },
+    },
     P: { auto: true, range: (u, min, max) => [0, Math.max(max * 1.1, 0.5)] },
   };
 
