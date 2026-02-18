@@ -67,6 +67,7 @@ export default function App() {
   const [dataH, setDataH] = createSignal(null);
   const [dataQ, setDataQ] = createSignal(null);
   const [forecastData, setForecastData] = createSignal(null);
+  const [forecastLoading, setForecastLoading] = createSignal(false);
 
   fetchData();
 
@@ -85,26 +86,39 @@ export default function App() {
       return `/api/station/${stationId()}/series?${params}`;
     };
 
+    // Phase 1 : données observées (rapide)
     try {
-      const [resH, resQ, resForecast] = await Promise.all([
+      const [resH, resQ] = await Promise.all([
         fetch(buildUrl('H')),
         fetch(buildUrl('Q')),
-        fetch(`/api/station/${stationId()}/forecast`).catch(() => null),
       ]);
 
       if (!resH.ok && !resQ.ok) throw new Error(`Erreur H:${resH.status} Q:${resQ.status}`);
 
       const jsonH = resH.ok ? await resH.json() : null;
       const jsonQ = resQ.ok ? await resQ.json() : null;
-      const jsonForecast = resForecast?.ok ? await resForecast.json() : null;
-
       setDataH(jsonH);
       setDataQ(jsonQ);
-      setForecastData(jsonForecast?.forecasts?.length ? jsonForecast : null);
     } catch (err) {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+
+    // Phase 2 : prévisions en background (uniquement Chateaubourg)
+    if (stationId() === 'J706062001') {
+      setForecastLoading(true);
+      try {
+        const res = await fetch(`/api/station/${stationId()}/forecast`);
+        if (res.ok) {
+          const json = await res.json();
+          setForecastData(json?.forecasts?.length ? json : null);
+        }
+      } catch {
+        // silencieux
+      } finally {
+        setForecastLoading(false);
+      }
     }
   }
 
@@ -204,6 +218,12 @@ export default function App() {
       )}
 
       {(dataH() || dataQ()) && <HydroChart dataH={dataH()} dataQ={dataQ()} forecast={forecastData()} />}
+
+      {forecastLoading() && (
+        <p style={{ "font-size": "13px", color: "#86868b", "text-align": "center", "margin-top": "0.5rem", "margin-bottom": "0" }}>
+          Chargement des prévisions…
+        </p>
+      )}
 
       <details style={{
         "margin-top": "1.5rem",
