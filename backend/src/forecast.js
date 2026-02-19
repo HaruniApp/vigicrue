@@ -345,29 +345,36 @@ export async function forecast(stationId) {
 
   // --- Denormalize predictions for all stations ---
   const outputMap = meta.output_map;
-  const rmseData = meta.rmse || {};
+  const nQuantiles = meta.n_quantiles ?? 1;
   const allForecasts = {};
 
   for (const code of STATION_CODES) {
     const om = outputMap[code];
     const np_h = normParams[`${code}_h`];
     const hRange = (np_h?.max ?? 0) - (np_h?.min ?? 0);
+    const hMin = np_h?.min ?? 0;
     const sd = stationData[code];
     const lastHNorm = normalize(sd.h[inputWindow - 1] ?? 0, np_h?.min, np_h?.max);
-    const stationRmse = rmseData[code];
 
     const hForecasts = forecastHorizons.map((h, j) => {
-      const delta = predictions[om.h_start + j];
-      const rawMm = (lastHNorm + delta) * hRange + (np_h?.min ?? 0);
-      const meters = rawMm / 1000;
       const timestamp = new Date(lastHour.getTime() + h * 3600000);
-      const point = { t: timestamp.toISOString(), v: meters, horizon: `t+${h}h` };
-      if (stationRmse?.h?.[j] != null) {
-        const rmseM = stationRmse.h[j] / 1000; // mm → m
-        point.v_lower = meters - rmseM;
-        point.v_upper = meters + rmseM;
+      if (nQuantiles >= 3) {
+        const base = om.h_start * nQuantiles + j * nQuantiles;
+        const deltaQ10 = predictions[base + 0];
+        const deltaQ50 = predictions[base + 1];
+        const deltaQ90 = predictions[base + 2];
+        const meters = ((lastHNorm + deltaQ50) * hRange + hMin) / 1000;
+        let vLower = ((lastHNorm + deltaQ10) * hRange + hMin) / 1000;
+        let vUpper = ((lastHNorm + deltaQ90) * hRange + hMin) / 1000;
+        // Anti quantile-crossing
+        vLower = Math.min(vLower, meters);
+        vUpper = Math.max(vUpper, meters);
+        return { t: timestamp.toISOString(), v: meters, v_lower: vLower, v_upper: vUpper, horizon: `t+${h}h` };
+      } else {
+        const delta = predictions[om.h_start + j];
+        const meters = ((lastHNorm + delta) * hRange + hMin) / 1000;
+        return { t: timestamp.toISOString(), v: meters, horizon: `t+${h}h` };
       }
-      return point;
     });
 
     const entry = { h: hForecasts };
@@ -375,20 +382,27 @@ export async function forecast(stationId) {
     if (om.q_start != null) {
       const np_q = normParams[`${code}_q`];
       const qRange = (np_q?.max ?? 0) - (np_q?.min ?? 0);
+      const qMin = np_q?.min ?? 0;
       const lastQNorm = normalize(sd.q[inputWindow - 1] ?? 0, np_q?.min, np_q?.max);
 
       entry.q = forecastHorizons.map((h, j) => {
-        const delta = predictions[om.q_start + j];
-        const rawLs = (lastQNorm + delta) * qRange + (np_q?.min ?? 0);
-        const m3s = rawLs / 1000;
         const timestamp = new Date(lastHour.getTime() + h * 3600000);
-        const point = { t: timestamp.toISOString(), v: m3s, horizon: `t+${h}h` };
-        if (stationRmse?.q?.[j] != null) {
-          const rmseM3s = stationRmse.q[j] / 1000; // L/s → m³/s
-          point.v_lower = m3s - rmseM3s;
-          point.v_upper = m3s + rmseM3s;
+        if (nQuantiles >= 3) {
+          const base = om.q_start * nQuantiles + j * nQuantiles;
+          const deltaQ10 = predictions[base + 0];
+          const deltaQ50 = predictions[base + 1];
+          const deltaQ90 = predictions[base + 2];
+          const m3s = ((lastQNorm + deltaQ50) * qRange + qMin) / 1000;
+          let vLower = ((lastQNorm + deltaQ10) * qRange + qMin) / 1000;
+          let vUpper = ((lastQNorm + deltaQ90) * qRange + qMin) / 1000;
+          vLower = Math.min(vLower, m3s);
+          vUpper = Math.max(vUpper, m3s);
+          return { t: timestamp.toISOString(), v: m3s, v_lower: vLower, v_upper: vUpper, horizon: `t+${h}h` };
+        } else {
+          const delta = predictions[om.q_start + j];
+          const m3s = ((lastQNorm + delta) * qRange + qMin) / 1000;
+          return { t: timestamp.toISOString(), v: m3s, horizon: `t+${h}h` };
         }
-        return point;
       });
     }
 

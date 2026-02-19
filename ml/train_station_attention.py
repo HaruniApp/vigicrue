@@ -1,4 +1,4 @@
-"""Station-Attention model pour la prédiction multi-station de crues.
+"""Station-Attention model avec quantile regression pour la prédiction multi-station de crues.
 
 Architecture :
   Per-station LSTM (partagé) → Cross-station Attention → Shared Decoder (H + Q)
@@ -6,7 +6,7 @@ Architecture :
 Input passé:  (batch, 72, n_features)  → reshape → 11 stations × (batch, 72, 7)
 Input futur:  (batch, n_stations * future_hours)
 
-Output: (batch, n_outputs)  → 11 stations × 24 horizons H + 7 stations × 24 horizons Q
+Output: (batch, n_outputs * 3)  → 3 quantiles (q10, q50, q90) interleaved per horizon
 
 Usage:
     python train_station_attention.py
@@ -60,12 +60,16 @@ class StationAttentionModel(nn.Module):
         lstm_layers: int = 2,
         dropout: float = 0.1,
         stations_with_q_indices: list[int] | None = None,
+        n_quantiles: int = 3,
+        quantiles: list[float] | None = None,
     ):
         super().__init__()
         self.n_stations = n_stations
         self.vars_per_station = vars_per_station
         self.hidden_size = hidden_size
         self.n_horizons = n_horizons
+        self.n_quantiles = n_quantiles
+        self.quantiles = quantiles or [0.1, 0.5, 0.9]
         # Indices (dans STATION_CODES) des stations avec Q
         if stations_with_q_indices is None:
             stations_with_q_indices = [i for i, c in enumerate(STATION_CODES) if c not in STATIONS_NO_Q]
@@ -103,18 +107,18 @@ class StationAttentionModel(nn.Module):
             ))
             self.ffn_norms.append(nn.LayerNorm(hidden_size))
 
-        # Shared decoders
+        # Shared decoders (output n_horizons * n_quantiles, interleaved)
         self.decoder_h = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_size, n_horizons),
+            nn.Linear(hidden_size, n_horizons * n_quantiles),
         )
         self.decoder_q = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(hidden_size, n_horizons),
+            nn.Linear(hidden_size, n_horizons * n_quantiles),
         )
 
     def forward(self, past: torch.Tensor, future_precip: torch.Tensor) -> torch.Tensor:
@@ -171,6 +175,32 @@ class StationAttentionModel(nn.Module):
                 q_idx += 1
 
         return torch.cat(outputs, dim=1)
+
+
+def quantile_loss(pred, target, quantiles, h_indices, q_indices, n_q, flood_mask=None, flood_weight=2.0):
+    """Pinball loss avec pénalité asymétrique en crue pour q50.
+
+    pred: (batch, n_outputs * n_q) — interleaved quantiles
+    target: (batch, n_outputs) — single target per horizon
+    h_indices, q_indices: indices dans l'output_map original (sans quantiles)
+    """
+    total = 0.0
+    for qi, q in enumerate(quantiles):
+        # Extraire les prédictions de ce quantile : stride n_q depuis offset qi
+        pred_q = pred[:, qi::n_q]  # (batch, n_outputs)
+        errors = target - pred_q   # positif = sous-estimation
+
+        loss = torch.where(errors >= 0, q * errors, (q - 1) * errors)
+        loss_h = loss[:, h_indices].mean()
+        loss_q = loss[:, q_indices].mean()
+
+        # Pénalité asymétrique sur q50 en crue
+        if q == 0.5 and flood_mask is not None:
+            underest = (errors[:, h_indices].clamp(min=0) * flood_mask.unsqueeze(1)).mean()
+            loss_h = loss_h + flood_weight * underest
+
+        total += loss_h + 0.3 * loss_q
+    return total / n_q
 
 
 def main():
@@ -373,9 +403,14 @@ def main():
 
     best_val_loss = float("inf")
     patience_counter = 0
-    mse = nn.MSELoss()
+    n_q = 3
+    model_quantiles = [0.1, 0.5, 0.9]
 
-    print(f"\nEntraînement — {args.epochs} epochs max")
+    # Flood mask: index de Châteaubourg H dans le tensor paddé
+    chateaubourg_station_idx = STATION_CODES.index(target_code)
+    chateaubourg_padded_h_idx = chateaubourg_station_idx * VARS_PER_STATION + 0
+
+    print(f"\nEntraînement (quantile regression) — {args.epochs} epochs max")
     print(f"{'Epoch':>6} {'Train':>10} {'Val':>10} {'Val H':>10} {'Val Q':>10} {'LR':>10}")
     print("-" * 58)
 
@@ -386,11 +421,18 @@ def main():
         n = 0
         for X_b, fp_b, y_b in train_loader:
             X_b, fp_b, y_b = X_b.to(device), fp_b.to(device), y_b.to(device)
+
+            # Flood mask from Châteaubourg H at last timestep
+            h_last_norm_batch = X_b[:, -1, chateaubourg_padded_h_idx]
+            h_last_mm_batch = h_last_norm_batch * t_range + t_min
+            flood_mask = (h_last_mm_batch >= FLOOD_THRESHOLD_1).float()
+
             optimizer.zero_grad()
             pred = model(X_b, fp_b)
-            loss_h = mse(pred[:, h_output_indices], y_b[:, h_output_indices])
-            loss_q = mse(pred[:, q_output_indices], y_b[:, q_output_indices])
-            loss = loss_h + 0.3 * loss_q
+            loss = quantile_loss(
+                pred, y_b, model_quantiles, h_output_indices, q_output_indices,
+                n_q=n_q, flood_mask=flood_mask,
+            )
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
@@ -398,7 +440,7 @@ def main():
             n += 1
         train_loss /= n
 
-        # Val
+        # Val (quantile loss, no flood mask)
         model.eval()
         val_loss = 0.0
         val_loss_h = 0.0
@@ -408,9 +450,16 @@ def main():
             for X_b, fp_b, y_b in val_loader:
                 X_b, fp_b, y_b = X_b.to(device), fp_b.to(device), y_b.to(device)
                 pred = model(X_b, fp_b)
-                lh = mse(pred[:, h_output_indices], y_b[:, h_output_indices]).item()
-                lq = mse(pred[:, q_output_indices], y_b[:, q_output_indices]).item()
-                val_loss += lh + 0.3 * lq
+                vl = quantile_loss(
+                    pred, y_b, model_quantiles, h_output_indices, q_output_indices, n_q=n_q,
+                )
+                # Separate H/Q loss for display (pinball on q50 only)
+                pred_q50 = pred[:, 1::n_q]
+                errors = y_b - pred_q50
+                loss_q50 = torch.where(errors >= 0, 0.5 * errors, -0.5 * errors)
+                lh = loss_q50[:, h_output_indices].mean().item()
+                lq = loss_q50[:, q_output_indices].mean().item()
+                val_loss += vl.item()
                 val_loss_h += lh
                 val_loss_q += lq
                 nv += 1
@@ -447,7 +496,7 @@ def main():
     model.load_state_dict(torch.load(CHECKPOINTS_DIR / "station_attn_best.pt", weights_only=True))
     model.eval()
 
-    results = {"model": "StationAttention", "val": {}, "test": {}}
+    results = {"model": "StationAttention_Quantile", "val": {}, "test": {}}
 
     # Indices de H et Q dans X non-paddé (pour récupérer h_last, q_last)
     h_feat_indices = {}
@@ -468,25 +517,28 @@ def main():
                 all_preds.append(model(X_b, fp_b).cpu().numpy())
                 all_targets.append(y_b.numpy())
 
-        y_pred = np.concatenate(all_preds)
-        y_true = np.concatenate(all_targets)
+        y_pred_raw = np.concatenate(all_preds)  # (N, n_outputs * 3)
+        y_true = np.concatenate(all_targets)      # (N, n_outputs)
+
+        # Extract quantile slices
+        y_pred_q10 = y_pred_raw[:, 0::n_q]  # (N, n_outputs)
+        y_pred_q50 = y_pred_raw[:, 1::n_q]
+        y_pred_q90 = y_pred_raw[:, 2::n_q]
 
         print(f"\n{split_name.upper()}:")
 
-        # Per-station metrics (NSE sur valeurs absolues, comme l'ancien TFT)
+        # Per-station metrics on q50 (NSE sur valeurs absolues)
         for code in STATION_CODES:
             om = meta["output_map"][code]
             np_h = norm_params[f"{code}_h"]
             h_min, h_max = np_h["min"], np_h["max"]
             h_range = h_max - h_min
 
-            # h_last normalisé au dernier pas de chaque fenêtre (X non-paddé)
             h_last_norm = X_raw[:, -1, h_feat_indices[code]].numpy()
 
             for j, h in enumerate(FORECAST_HORIZONS):
                 idx = om["h_start"] + j
-                # Delta normalisé → valeur absolue en mm
-                pred_abs_mm = (h_last_norm + y_pred[:, idx]) * h_range + h_min
+                pred_abs_mm = (h_last_norm + y_pred_q50[:, idx]) * h_range + h_min
                 true_abs_mm = (h_last_norm + y_true[:, idx]) * h_range + h_min
                 rmse = float(np.sqrt(np.mean((true_abs_mm - pred_abs_mm) ** 2)))
                 mae = float(np.mean(np.abs(true_abs_mm - pred_abs_mm)))
@@ -494,8 +546,17 @@ def main():
                 ss_tot = np.sum((true_abs_mm - np.mean(true_abs_mm)) ** 2)
                 nse = float(1 - ss_res / ss_tot) if ss_tot > 1e-10 else 0.0
 
+                # Calibration: P(y < q10) should ≈ 10%, P(y < q90) should ≈ 90%
+                pred_q10_mm = (h_last_norm + y_pred_q10[:, idx]) * h_range + h_min
+                pred_q90_mm = (h_last_norm + y_pred_q90[:, idx]) * h_range + h_min
+                p_below_q10 = float(np.mean(true_abs_mm < pred_q10_mm))
+                p_below_q90 = float(np.mean(true_abs_mm < pred_q90_mm))
+
                 key = f"{code}_H_t+{h}h"
-                results[split_name][key] = {"rmse": rmse, "mae": mae, "nse": nse}
+                results[split_name][key] = {
+                    "rmse": rmse, "mae": mae, "nse": nse,
+                    "p_below_q10": p_below_q10, "p_below_q90": p_below_q90,
+                }
 
             if "q_start" in om:
                 np_q = norm_params[f"{code}_q"]
@@ -505,7 +566,7 @@ def main():
 
                 for j, h in enumerate(FORECAST_HORIZONS):
                     idx = om["q_start"] + j
-                    pred_abs_ls = (q_last_norm + y_pred[:, idx]) * q_range + q_min
+                    pred_abs_ls = (q_last_norm + y_pred_q50[:, idx]) * q_range + q_min
                     true_abs_ls = (q_last_norm + y_true[:, idx]) * q_range + q_min
                     rmse = float(np.sqrt(np.mean((true_abs_ls - pred_abs_ls) ** 2)))
                     mae = float(np.mean(np.abs(true_abs_ls - pred_abs_ls)))
@@ -517,40 +578,26 @@ def main():
                     results[split_name][key] = {"rmse": rmse, "mae": mae, "nse": nse}
 
         # Summary: avg NSE H across all stations at each horizon
-        print("  Avg NSE H par horizon:")
+        print("  Avg NSE H (q50) par horizon:")
         for h in FORECAST_HORIZONS:
             nses = [results[split_name][f"{c}_H_t+{h}h"]["nse"] for c in STATION_CODES]
             print(f"    t+{h}h: {np.mean(nses):.4f} (min={min(nses):.4f}, max={max(nses):.4f})")
 
         # Châteaubourg H specifically
-        print(f"  Châteaubourg (J706062001) H:")
+        print(f"  Châteaubourg (J706062001) H (q50):")
         for h in FORECAST_HORIZONS:
             m = results[split_name][f"J706062001_H_t+{h}h"]
             print(f"    t+{h}h: NSE={m['nse']:.4f}, RMSE={m['rmse']:.1f}mm")
 
+        # Calibration summary
+        print(f"  Calibration Châteaubourg H:")
+        for h in FORECAST_HORIZONS:
+            m = results[split_name][f"J706062001_H_t+{h}h"]
+            print(f"    t+{h}h: P(y<q10)={m['p_below_q10']:.1%} (cible 10%), P(y<q90)={m['p_below_q90']:.1%} (cible 90%)")
+
     # Sauvegarder
     with open(CHECKPOINTS_DIR / "station_attn_results.json", "w") as f:
         json.dump(results, f, indent=2)
-
-    # Build RMSE dict per station/horizon (from test set) for confidence intervals
-    rmse_per_station = {}
-    for code in STATION_CODES:
-        rmse_h = []
-        for h in FORECAST_HORIZONS:
-            key = f"{code}_H_t+{h}h"
-            rmse_h.append(results["test"][key]["rmse"])
-        entry = {"h": rmse_h}
-
-        # Q if available
-        om = meta["output_map"][code]
-        if "q_start" in om:
-            rmse_q = []
-            for h in FORECAST_HORIZONS:
-                key = f"{code}_Q_t+{h}h"
-                rmse_q.append(results["test"][key]["rmse"])
-            entry["q"] = rmse_q
-
-        rmse_per_station[code] = entry
 
     model_config = {
         "n_stations": n_stations,
@@ -564,8 +611,10 @@ def main():
         "dropout": 0.1,
         "stations_with_q_indices": stations_with_q_indices,
         "n_outputs": n_outputs,
+        "n_outputs_total": n_outputs * n_q,
         "n_features": n_features,
-        "rmse": rmse_per_station,
+        "n_quantiles": n_q,
+        "quantiles": model_quantiles,
     }
     with open(CHECKPOINTS_DIR / "station_attn_config.json", "w") as f:
         json.dump(model_config, f, indent=2)

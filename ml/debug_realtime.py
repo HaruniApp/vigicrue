@@ -268,7 +268,8 @@ def main():
     })
     predictions = outputs[0][0]
 
-    print(f"\nPredictions ({len(predictions)} outputs):")
+    n_quantiles = meta.get("n_quantiles", 1)
+    print(f"\nPredictions ({len(predictions)} outputs, {n_quantiles} quantiles):")
 
     output_map = meta["output_map"]
     forecast_horizons = meta["forecast_horizons"]
@@ -277,24 +278,46 @@ def main():
         om = output_map[code]
         np_h = norm_params.get(f"{code}_h", {})
         h_range = (np_h.get("max", 0) or 0) - (np_h.get("min", 0) or 0)
+        h_min = np_h.get("min", 0) or 0
         last_h_norm = normalize(station_data[code]["h"][-1] or 0, np_h.get("min"), np_h.get("max"))
 
         print(f"\n  {code} H:")
         for j, h in enumerate(forecast_horizons):
-            delta = predictions[om["h_start"] + j]
-            raw_mm = (last_h_norm + delta) * h_range + (np_h.get("min", 0) or 0)
-            print(f"    t+{h:>2d}h: delta={delta:.6f} → {raw_mm:.1f} mm → {raw_mm/1000:.3f} m")
+            if n_quantiles >= 3:
+                base = om["h_start"] * n_quantiles + j * n_quantiles
+                delta_q10 = predictions[base + 0]
+                delta_q50 = predictions[base + 1]
+                delta_q90 = predictions[base + 2]
+                mm_q10 = (last_h_norm + delta_q10) * h_range + h_min
+                mm_q50 = (last_h_norm + delta_q50) * h_range + h_min
+                mm_q90 = (last_h_norm + delta_q90) * h_range + h_min
+                print(f"    t+{h:>2d}h: {mm_q50:.1f} mm [{mm_q10:.1f} – {mm_q90:.1f}] → {mm_q50/1000:.3f} m [{mm_q10/1000:.3f} – {mm_q90/1000:.3f}]")
+            else:
+                delta = predictions[om["h_start"] + j]
+                raw_mm = (last_h_norm + delta) * h_range + h_min
+                print(f"    t+{h:>2d}h: delta={delta:.6f} → {raw_mm:.1f} mm → {raw_mm/1000:.3f} m")
 
         if "q_start" in om:
             np_q = norm_params.get(f"{code}_q", {})
             q_range = (np_q.get("max", 0) or 0) - (np_q.get("min", 0) or 0)
+            q_min = np_q.get("min", 0) or 0
             last_q_norm = normalize(station_data[code]["q"][-1] or 0, np_q.get("min"), np_q.get("max"))
 
             print(f"  {code} Q:")
             for j, h in enumerate(forecast_horizons):
-                delta = predictions[om["q_start"] + j]
-                raw_ls = (last_q_norm + delta) * q_range + (np_q.get("min", 0) or 0)
-                print(f"    t+{h:>2d}h: delta={delta:.6f} → {raw_ls:.0f} L/s → {raw_ls/1000:.3f} m³/s")
+                if n_quantiles >= 3:
+                    base = om["q_start"] * n_quantiles + j * n_quantiles
+                    delta_q10 = predictions[base + 0]
+                    delta_q50 = predictions[base + 1]
+                    delta_q90 = predictions[base + 2]
+                    ls_q10 = (last_q_norm + delta_q10) * q_range + q_min
+                    ls_q50 = (last_q_norm + delta_q50) * q_range + q_min
+                    ls_q90 = (last_q_norm + delta_q90) * q_range + q_min
+                    print(f"    t+{h:>2d}h: {ls_q50:.0f} L/s [{ls_q10:.0f} – {ls_q90:.0f}] → {ls_q50/1000:.3f} m³/s [{ls_q10/1000:.3f} – {ls_q90/1000:.3f}]")
+                else:
+                    delta = predictions[om["q_start"] + j]
+                    raw_ls = (last_q_norm + delta) * q_range + q_min
+                    print(f"    t+{h:>2d}h: delta={delta:.6f} → {raw_ls:.0f} L/s → {raw_ls/1000:.3f} m³/s")
 
 
 if __name__ == "__main__":

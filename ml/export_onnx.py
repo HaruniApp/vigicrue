@@ -38,6 +38,8 @@ def load_station_attn():
         lstm_layers=config["lstm_layers"],
         dropout=config["dropout"],
         stations_with_q_indices=config["stations_with_q_indices"],
+        n_quantiles=config.get("n_quantiles", 3),
+        quantiles=config.get("quantiles", [0.1, 0.5, 0.9]),
     )
     model.load_state_dict(
         torch.load(CHECKPOINTS_DIR / "station_attn_best.pt", weights_only=True, map_location="cpu")
@@ -113,13 +115,15 @@ def export_to_onnx(model: torch.nn.Module, config: dict) -> str:
         "future_precip_size": future_precip_size,
         "future_precip_hours": meta["future_precip_hours"],
         "n_outputs": config["n_outputs"],
+        "n_outputs_total": config.get("n_outputs_total", config["n_outputs"]),
+        "n_quantiles": config.get("n_quantiles", 1),
+        "quantiles": config.get("quantiles", [0.5]),
         "forecast_horizons": meta["forecast_horizons"],
         "station_codes": meta["station_codes"],
         "station_feature_map": meta["station_feature_map"],
         "output_map": meta["output_map"],
         "feature_names": meta["feature_names"],
         "target_mode": meta.get("target_mode", "delta"),
-        "rmse": config.get("rmse", {}),
     }
     meta_path = ONNX_DIR / "station_attn_meta.json"
     with open(meta_path, "w") as f:
