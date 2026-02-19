@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Projet
 
-Vigicrue — Visualisation des hauteurs d'eau et débits des stations hydrométriques françaises via les données ouvertes de [Hydro EauFrance](https://www.hydro.eaufrance.fr).
+Vigicrue — Visualisation et prédiction des hauteurs d'eau et débits des stations hydrométriques françaises via les données ouvertes de [Hydro EauFrance](https://www.hydro.eaufrance.fr), avec un modèle ML de prévision de crues.
 
 ## Commandes
 
@@ -55,30 +55,58 @@ Secrets GitHub à configurer (`Settings > Secrets and variables > Actions`) :
 
 ## Architecture
 
-Monorepo avec deux sous-projets indépendants (chacun a son propre `package.json`) :
+Monorepo avec trois sous-projets :
 
-- **backend/** — Proxy Express (Node.js) vers l'API Hydro EauFrance
+- **backend/** — Express (Node.js) : proxy API Hydro EauFrance + inférence ONNX pour les prévisions
 - **frontend/** — SPA SolidJS + uPlot pour visualiser les courbes hydrologiques
+- **ml/** — Pipeline ML (PyTorch) pour entraîner le modèle de prédiction de crues
 
 ### Chaîne de requêtes en dev
 
 ```
 Browser → Vite (:5173) → proxy /api → Express (:3001) → hydro.eaufrance.fr
+                                                       → Open-Meteo (précip/sol)
+                                                       → ONNX Runtime (prévisions)
 ```
 
-Vite proxie `/api` vers le backend (configuré dans `frontend/vite.config.js`). Le backend existe uniquement pour contourner les restrictions CORS de l'API EauFrance — il ajoute les headers nécessaires (`X-Requested-With`, `Referer`, etc.).
+Vite proxie `/api` vers le backend (configuré dans `frontend/vite.config.js`).
 
-### Flux de données
+### Flux de données (observations)
 
 1. `App.jsx` : formulaire station/dates → fetch parallèle des séries H (hauteur) et Q (débit)
 2. L'API retourne `{ series: { data: [{ t, v }, ...] } }` — timestamps ISO + valeurs en mm (H) ou L/s (Q)
 3. `HydroChart.jsx` : `buildData()` convertit en tableaux uPlot — timestamps Unix (secondes), valeurs en m (÷1000) et m³/s (÷1000). Les séries Q sont alignées sur les timestamps de H via une Map.
-4. Graphique double axe : H à gauche (scale `"H"`, side 3), Q à droite (scale `"Q"`, side 1). Les splits de l'axe Q sont calés sur le nombre de splits de l'axe H pour un alignement visuel.
+4. Graphique double axe : H à gauche (scale `"H"`, side 3), Q à droite (scale `"Q"`, side 1)
+
+### Flux de données (prévisions ML)
+
+1. `backend/src/forecast.js` : fetch 72h de données passées (11 stations H/Q + météo) → construit les tenseurs d'entrée paddés (7 vars/station)
+2. Inférence ONNX : modèle Station-Attention → 1296 sorties (432 horizons × 3 quantiles q10/q50/q90, interleaved)
+3. Dénormalisation : delta normalisé → valeur absolue en m (H) ou m³/s (Q), avec intervalles de confiance `v_lower`/`v_upper`
+4. Frontend : `HydroChart.jsx` affiche les prévisions q50 avec bandes de confiance q10-q90
+
+### Pipeline ML (ml/)
+
+```bash
+# Sur DGX : collecte → préparation → entraînement → export
+python collect_hydro.py && python collect_meteo.py
+python prepare_dataset.py
+python train_station_attention.py --hidden 128 --lr 5e-4 --attention-heads 8 --attn-layers 3
+python export_onnx.py --model station_attn
+
+# Copier dans le backend
+cp models/onnx/station_attn.onnx ../../backend/models/
+cp models/onnx/station_attn_meta.json ../../backend/models/
+cp models/onnx/norm_params.json ../../backend/models/
+```
+
+Modèle : Per-station LSTM → Cross-station Attention → Quantile Regression (q10/q50/q90) avec pinball loss asymétrique en crue.
 
 ## Stack technique
 
-- **Backend** : Express 4, cors, `node --watch` (pas de nodemon)
+- **Backend** : Express 4, cors, onnxruntime-node, `node --watch` (pas de nodemon)
 - **Frontend** : SolidJS, uPlot via `@dschz/solid-uplot` (plugins: cursor, tooltip, focusSeries), Vite 6
+- **ML** : PyTorch, ONNX, Open-Meteo API (précip + humidité du sol)
 - **Pas de TypeScript** — JS pur (ESM partout)
 
 ## Conventions
@@ -86,4 +114,5 @@ Vite proxie `/api` vers le backend (configuré dans `frontend/vite.config.js`). 
 - Palette couleurs : teal `#0d9488` (Hauteur) / amber `#d97706` (Débit)
 - Fuseau horaire : `Europe/Paris` (via `uPlot.tzDate`)
 - Locale d'affichage : `fr-FR`
-- Station par défaut dans le frontend : `J706062001`
+- Station par défaut dans le frontend : `J706062001` (Châteaubourg)
+- Layout quantile interleaved : pour chaque horizon `[q10, q50, q90]`, indices via `output_map[station].h_start * nQuantiles + j * nQuantiles`
