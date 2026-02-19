@@ -150,7 +150,7 @@ export default function App() {
         color: "#1d1d1f",
         "margin-top": "0",
         "margin-bottom": "1.5rem",
-      }}>Vigicrue</h1>
+      }}>Bassin Vilaine Amont</h1>
 
       <div style={{
         background: "#f5f5f7",
