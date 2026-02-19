@@ -1,6 +1,14 @@
 # ML — Prédiction de crues (bassin Vilaine Amont)
 
-Pipeline de Machine Learning pour prédire les hauteurs d'eau aux 11 stations hydrométriques du bassin Vilaine Amont, en utilisant les données historiques H/Q et les précipitations Open-Meteo.
+Pipeline de Machine Learning pour prédire les hauteurs d'eau et débits aux 11 stations hydrométriques du bassin Vilaine Amont, en utilisant les données historiques H/Q, les précipitations et l'humidité du sol Open-Meteo.
+
+## Architecture du modèle
+
+**Station-Attention avec Quantile Regression** :
+- Per-station LSTM (partagé) → Cross-station Multi-Head Attention → Shared Decoders (H + Q)
+- 3 quantiles par horizon : q10, q50, q90 (intervalles de confiance natifs)
+- Pinball loss avec pénalité asymétrique en crue (H ≥ 800mm à Châteaubourg)
+- 11 stations × 24 horizons (1-24h) × 3 quantiles = 1296 sorties
 
 ## Infrastructure
 
@@ -32,7 +40,7 @@ python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_
 # Données hydrologiques (H + Q) — 11 stations, depuis 2000
 python collect_hydro.py
 
-# Précipitations Open-Meteo — 11 points géographiques
+# Précipitations + humidité du sol Open-Meteo — 11 points géographiques
 python collect_meteo.py
 ```
 
@@ -59,90 +67,88 @@ Vérifie pour chaque station : fichiers présents, plage temporelle, taux de cou
 python prepare_dataset.py
 ```
 
-Fusionne les 11 stations, interpole les trous, crée les features (dH/dt, sin/cos temporel → 48 features), normalise et découpe en fenêtres glissantes.
+Fusionne les 11 stations, interpole les trous, crée les features (H, Q, dH, dQ, précip, humidité du sol — 7 vars/station), normalise et découpe en fenêtres glissantes.
 
 Split chronologique :
 - **Train** : jusqu'à fin 2023
 - **Validation** : 2024
 - **Test** : janvier 2025 (inclut la crue du 27/01/2025)
 
-Options :
-- `--window 168` pour une fenêtre d'entrée de 7 jours (défaut : 72h)
-- `--target J709063002` pour changer la station cible (défaut : Châteaubourg)
-
 Les fichiers `.npy` et métadonnées sont dans `data/processed/`.
 
-### 4. Entraînement — Baseline XGBoost
+### 4. Entraînement
 
 ```bash
-python train_xgboost.py
+python train_station_attention.py --hidden 128 --lr 5e-4 --attention-heads 8 --attn-layers 3
 ```
 
-Rapide (quelques minutes), sert de référence. Un modèle par horizon de prédiction.
+Options : `--epochs 100 --batch-size 256 --patience 20 --lstm-layers 2`
 
-### 5. Entraînement — LSTM
+Inclut le suréchantillonnage automatique des crues (x2/x4/x8 selon le seuil) et affiche les métriques de calibration des quantiles.
 
-```bash
-python train_lstm.py
-```
-
-LSTM 2 couches (128→64) avec early stopping. Utilise automatiquement le GPU.
-
-Options : `--epochs 200 --hidden1 256 --hidden2 128 --lr 0.0005`
-
-### 6. Entraînement — TFT (LSTM + Attention)
-
-```bash
-python train_tft.py
-```
-
-LSTM + Multi-Head Self-Attention. Plus lent mais capture mieux les dépendances inter-stations.
-
-Options : `--epochs 100 --hidden 64 --attention-heads 4`
-
-### 7. Évaluation comparative
+### 5. Évaluation
 
 ```bash
 python evaluate.py
 ```
 
-Compare les 3 modèles (NSE, RMSE, MAE) et génère un graphique `models/checkpoints/comparison.png`.
+Affiche les métriques (NSE, RMSE, MAE) par station et par horizon sur les jeux val/test.
 
-### 8. Export ONNX
+### 6. Export ONNX
 
 ```bash
-python export_onnx.py
+python export_onnx.py --model station_attn
 ```
 
-Exporte le meilleur modèle en ONNX dans `models/onnx/`, prêt pour l'inférence dans le backend Node.js via `onnxruntime-node`.
+Exporte le modèle en ONNX dans `models/onnx/`, prêt pour l'inférence dans le backend Node.js via `onnxruntime-node`. Inclut les métadonnées quantile (`n_quantiles`, `quantiles`).
 
-Options : `--model lstm` ou `--model tft` pour forcer un modèle spécifique.
+### 7. Debug temps réel
+
+```bash
+python debug_realtime.py
+```
+
+Fetch les données temps réel des 11 stations et lance l'inférence ONNX. Affiche les prédictions q50 avec intervalles [q10 – q90] pour vérification.
+
+### 8. Déploiement
+
+```bash
+cp models/onnx/station_attn.onnx ../../backend/models/
+cp models/onnx/station_attn_meta.json ../../backend/models/
+cp models/onnx/norm_params.json ../../backend/models/
+```
 
 ## Structure
 
 ```
 ml/
-├── config.py              # stations, coordonnées, paramètres
-├── collect_hydro.py       # collecte H+Q (Hydro EauFrance)
-├── collect_meteo.py       # collecte précipitations (Open-Meteo)
-├── validate_data.py       # validation des données brutes
-├── prepare_dataset.py     # nettoyage, features, fenêtrage
-├── train_xgboost.py       # baseline XGBoost
-├── train_lstm.py          # modèle LSTM
-├── train_tft.py           # modèle TFT (LSTM + Attention)
-├── evaluate.py            # comparaison des modèles
-├── export_onnx.py         # export ONNX
-├── requirements.txt       # dépendances Python
-├── data/                  # gitignored
-│   ├── raw/               # CSV bruts par station
-│   └── processed/         # dataset unifié (.npy)
-└── models/                # gitignored
-    ├── checkpoints/       # poids PyTorch + résultats JSON
-    └── onnx/              # modèle exporté + métadonnées
+├── config.py                    # stations, coordonnées, paramètres
+├── collect_hydro.py             # collecte H+Q (Hydro EauFrance)
+├── collect_meteo.py             # collecte précipitations + humidité du sol (Open-Meteo)
+├── validate_data.py             # validation des données brutes
+├── prepare_dataset.py           # nettoyage, features, fenêtrage
+├── train_station_attention.py   # modèle Station-Attention + quantile regression
+├── evaluate.py                  # métriques par station/horizon
+├── export_onnx.py               # export ONNX + métadonnées
+├── debug_realtime.py            # test inférence temps réel
+├── requirements.txt             # dépendances Python
+├── data/                        # gitignored
+│   ├── raw/                     # CSV bruts par station
+│   └── processed/               # dataset unifié (.npy)
+└── models/                      # gitignored
+    ├── checkpoints/             # poids PyTorch + résultats JSON
+    └── onnx/                    # modèle exporté + métadonnées
 ```
 
-## Métriques cibles
+## Métriques
 
-- **NSE > 0.8** sur le jeu de test (standard en hydrologie)
-- Focus sur la **crue du 27/01/2025** : le modèle doit anticiper la montée
-- Horizons de prédiction : **t+1h, t+3h, t+6h, t+12h, t+24h**
+Résultats sur le jeu de test (Châteaubourg, q50) :
+
+| Horizon | NSE | RMSE |
+|---------|-----|------|
+| t+1h | 0.9999 | 6 mm |
+| t+6h | 0.9967 | 36 mm |
+| t+12h | 0.9887 | 67 mm |
+| t+24h | 0.9710 | 108 mm |
+
+Calibration des quantiles : P(y < q10) ≈ 8%, P(y < q90) ≈ 92% (cibles 10%/90%).
