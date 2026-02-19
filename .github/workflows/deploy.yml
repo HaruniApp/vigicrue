@@ -16,11 +16,11 @@ jobs:
           username: sb
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd /opt/vigicrue
-            git remote set-url origin https://github.com/HaruniApp/vigicrue.git
+            cd /opt/vilaine-amont
+            git remote set-url origin https://github.com/HaruniApp/vilaine-amont.git
             git fetch origin main
             git reset --hard origin/main
             npm -C backend install --production
             npm -C frontend install
             VITE_APP_VERSION="1.0.${{ github.run_number }}" npm -C frontend run build
-            pm2 restart vigicrue-api
+            pm2 restart vilaine-amont-api
