@@ -142,13 +142,13 @@ ml/
 
 ## Métriques
 
-Résultats sur le jeu de test (Châteaubourg, q50) :
+Résultats sur le jeu de test — hiver 2025-2026 (Châteaubourg, q50) :
 
 | Horizon | NSE | RMSE |
-|---------|-----|------|
+|---------|------|------|
 | t+1h | 0.9999 | 6 mm |
-| t+6h | 0.9967 | 36 mm |
-| t+12h | 0.9887 | 67 mm |
-| t+24h | 0.9710 | 108 mm |
+| t+6h | 0.9968 | 36 mm |
+| t+12h | 0.9884 | 69 mm |
+| t+24h | 0.9699 | 112 mm |
 
-Calibration des quantiles : P(y < q10) ≈ 8%, P(y < q90) ≈ 92% (cibles 10%/90%).
+Calibration des quantiles : P(y < q10) ≈ 10%, P(y < q90) ≈ 85% (cibles 10%/90%).
