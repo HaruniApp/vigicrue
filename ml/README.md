@@ -70,9 +70,9 @@ python prepare_dataset.py
 Fusionne les 11 stations, interpole les trous, crée les features (H, Q, dH, dQ, précip, humidité du sol — 7 vars/station), normalise et découpe en fenêtres glissantes.
 
 Split chronologique :
-- **Train** : jusqu'à fin 2023
-- **Validation** : 2024
-- **Test** : janvier 2025 (inclut la crue du 27/01/2025)
+- **Train** : 2000-01-01 → 2025-06-30 (25.5 ans, inclut la crue majeure de janvier 2025)
+- **Validation** : 2025-07-01 → 2025-12-31 (6 mois, montée automnale)
+- **Test** : 2026-01-01 → aujourd'hui (hiver 2025-2026)
 
 Les fichiers `.npy` et métadonnées sont dans `data/processed/`.
 
