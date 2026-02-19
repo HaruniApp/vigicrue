@@ -64,8 +64,8 @@ def fetch_meteo(lat, lon, past_hours, forecast_hours):
     """Fetch precipitation and soil moisture from Open-Meteo forecast API."""
     url = (f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
            f"&past_hours={past_hours}&forecast_hours={forecast_hours}"
-           f"&hourly=precipitation,soil_moisture_0_to_7cm,soil_moisture_0_to_28cm"
-           f"&timezone=Europe%2FParis")
+           f"&hourly=precipitation,soil_moisture_0_to_7cm,soil_moisture_7_to_28cm"
+           f"&models=ecmwf_ifs025&timezone=Europe%2FParis")
     try:
         resp = requests.get(url, timeout=30)
         data = resp.json()
@@ -73,15 +73,15 @@ def fetch_meteo(lat, lon, past_hours, forecast_hours):
         times = hourly.get("time", [])
         precip = hourly.get("precipitation", [])
         soil_7cm = hourly.get("soil_moisture_0_to_7cm", [])
-        soil_28cm = hourly.get("soil_moisture_0_to_28cm", [])
+        soil_28cm = hourly.get("soil_moisture_7_to_28cm", [])
         return {
             "precip": [{"t": t, "v": precip[i] if i < len(precip) else 0} for i, t in enumerate(times)],
             "soil_moisture_0_to_7cm": [{"t": t, "v": soil_7cm[i] if i < len(soil_7cm) else 0} for i, t in enumerate(times)],
-            "soil_moisture_0_to_28cm": [{"t": t, "v": soil_28cm[i] if i < len(soil_28cm) else 0} for i, t in enumerate(times)],
+            "soil_moisture_7_to_28cm": [{"t": t, "v": soil_28cm[i] if i < len(soil_28cm) else 0} for i, t in enumerate(times)],
         }
     except Exception as e:
         print(f"  Meteo ({lat},{lon}): {e}")
-        return {"precip": [], "soil_moisture_0_to_7cm": [], "soil_moisture_0_to_28cm": []}
+        return {"precip": [], "soil_moisture_0_to_7cm": [], "soil_moisture_7_to_28cm": []}
 
 
 def round_to_hour(dt):
@@ -197,13 +197,13 @@ def main():
         precip_future = all_precip[input_window:input_window + future_hours]
 
         all_soil_7cm = align_precip(meteo_raw[code]["soil_moisture_0_to_7cm"], all_precip_ts)
-        all_soil_28cm = align_precip(meteo_raw[code]["soil_moisture_0_to_28cm"], all_precip_ts)
+        all_soil_28cm = align_precip(meteo_raw[code]["soil_moisture_7_to_28cm"], all_precip_ts)
         soil_7cm_past = all_soil_7cm[:input_window]
         soil_28cm_past = all_soil_28cm[:input_window]
 
         station_data[code] = {
             "h": h_arr, "q": q_arr, "precip": precip_past, "precip_future": precip_future,
-            "soil_moisture_0_to_7cm": soil_7cm_past, "soil_moisture_0_to_28cm": soil_28cm_past,
+            "soil_moisture_0_to_7cm": soil_7cm_past, "soil_moisture_7_to_28cm": soil_28cm_past,
         }
 
     # Derivatives (central) + clip
@@ -247,9 +247,9 @@ def main():
 
             # Soil moisture (slots 5 and 6)
             np_soil7 = norm_params.get(f"{code}_soil_moisture_0_to_7cm", {})
-            np_soil28 = norm_params.get(f"{code}_soil_moisture_0_to_28cm", {})
+            np_soil28 = norm_params.get(f"{code}_soil_moisture_7_to_28cm", {})
             past_tensor[0, t, base + 5] = normalize(sd["soil_moisture_0_to_7cm"][t] or 0, np_soil7.get("min"), np_soil7.get("max"))
-            past_tensor[0, t, base + 6] = normalize(sd["soil_moisture_0_to_28cm"][t] or 0, np_soil28.get("min"), np_soil28.get("max"))
+            past_tensor[0, t, base + 6] = normalize(sd["soil_moisture_7_to_28cm"][t] or 0, np_soil28.get("min"), np_soil28.get("max"))
 
     # --- Build future precip tensor ---
     future_precip_tensor = np.zeros((1, n_stations * future_hours), dtype=np.float32)

@@ -43,9 +43,9 @@ class StationAttentionModel(nn.Module):
     """Per-station LSTM → Cross-station Attention → Shared Decoder.
 
     Chaque station a 7 variables d'entrée :
-    - Stations normales : H, Q, precip, dH, dQ, soil_moisture_0_to_7cm, soil_moisture_0_to_28cm
-    - Stations no_q (Taillis) : H, 0, precip, dH, 0, soil_moisture_0_to_7cm, soil_moisture_0_to_28cm
-    - Stations barrage : H, 0, precip, dH, release, soil_moisture_0_to_7cm, soil_moisture_0_to_28cm
+    - Stations normales : H, Q, precip, dH, dQ, soil_moisture_0_to_7cm, soil_moisture_7_to_28cm
+    - Stations no_q (Taillis) : H, 0, precip, dH, 0, soil_moisture_0_to_7cm, soil_moisture_7_to_28cm
+    - Stations barrage : H, 0, precip, dH, release, soil_moisture_0_to_7cm, soil_moisture_7_to_28cm
     """
 
     def __init__(
@@ -303,10 +303,10 @@ def main():
             src_vars = sfm["vars"]
 
             # Mapping des vars source vers slots de destination
-            # Slots: 0=h, 1=q, 2=precip, 3=dh, 4=dq/release, 5=soil_moisture_0_to_7cm, 6=soil_moisture_0_to_28cm
+            # Slots: 0=h, 1=q, 2=precip, 3=dh, 4=dq/release, 5=soil_moisture_0_to_7cm, 6=soil_moisture_7_to_28cm
             slot_map = {
                 "h": 0, "q": 1, "precip": 2, "dh": 3, "dq": 4, "release": 4,
-                "soil_moisture_0_to_7cm": 5, "soil_moisture_0_to_28cm": 6,
+                "soil_moisture_0_to_7cm": 5, "soil_moisture_7_to_28cm": 6,
             }
             dst_base = s_idx * VARS_PER_STATION
 

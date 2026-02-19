@@ -102,13 +102,13 @@ async function fetchHydroSeries(stationId, startAt, endAt, variable) {
 }
 
 async function fetchMeteo(lat, lon, pastHours, forecastHours) {
-  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&past_hours=${pastHours}&forecast_hours=${forecastHours}&hourly=precipitation,soil_moisture_0_to_7cm,soil_moisture_0_to_28cm&timezone=Europe%2FParis`;
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&past_hours=${pastHours}&forecast_hours=${forecastHours}&hourly=precipitation,soil_moisture_0_to_7cm,soil_moisture_7_to_28cm&models=ecmwf_ifs025&timezone=Europe%2FParis`;
   const data = await cachedFetch(url, {}, TTL_30MIN);
   if (!data) return { precip: [], soil7cm: [], soil28cm: [] };
   const times = data?.hourly?.time ?? [];
   const precip = data?.hourly?.precipitation ?? [];
   const soil7cm = data?.hourly?.soil_moisture_0_to_7cm ?? [];
-  const soil28cm = data?.hourly?.soil_moisture_0_to_28cm ?? [];
+  const soil28cm = data?.hourly?.soil_moisture_7_to_28cm ?? [];
   return {
     precip: times.map((t, i) => ({ t, v: precip[i] ?? 0 })),
     soil7cm: times.map((t, i) => ({ t, v: soil7cm[i] ?? 0 })),
@@ -319,7 +319,7 @@ export async function forecast(stationId) {
 
       // Soil moisture (slots 5 and 6)
       const np_soil7 = normParams[`${code}_soil_moisture_0_to_7cm`];
-      const np_soil28 = normParams[`${code}_soil_moisture_0_to_28cm`];
+      const np_soil28 = normParams[`${code}_soil_moisture_7_to_28cm`];
       pastTensor[t * nFeaturesPadded + base + 5] = normalize(sd.soil7cm[t] ?? 0, np_soil7?.min, np_soil7?.max);
       pastTensor[t * nFeaturesPadded + base + 6] = normalize(sd.soil28cm[t] ?? 0, np_soil28?.min, np_soil28?.max);
     }

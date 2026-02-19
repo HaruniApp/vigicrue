@@ -64,7 +64,7 @@ def load_raw_data() -> pd.DataFrame:
             station_data[(code, "precip")] = df
             all_timestamps.update(df["timestamp"].dt.floor("h"))
 
-        for soil_var in ["soil_moisture_0_to_7cm", "soil_moisture_0_to_28cm"]:
+        for soil_var in ["soil_moisture_0_to_7cm", "soil_moisture_7_to_28cm"]:
             soil_path = RAW_DIR / f"{code}_{soil_var}.csv"
             if soil_path.exists():
                 df = pd.read_csv(soil_path, parse_dates=["timestamp"])
@@ -109,7 +109,7 @@ def load_raw_data() -> pd.DataFrame:
         else:
             result[col_name] = np.nan
 
-        for soil_var in ["soil_moisture_0_to_7cm", "soil_moisture_0_to_28cm"]:
+        for soil_var in ["soil_moisture_0_to_7cm", "soil_moisture_7_to_28cm"]:
             soil_key = (code, soil_var)
             soil_col = f"{code}_{soil_var}"
             if soil_key in station_data:
@@ -222,7 +222,7 @@ def build_feature_order(df: pd.DataFrame) -> list[str]:
         if code in BARRAGE_CODES:
             feature_cols.append(f"{code}_release")
         feature_cols.append(f"{code}_soil_moisture_0_to_7cm")
-        feature_cols.append(f"{code}_soil_moisture_0_to_28cm")
+        feature_cols.append(f"{code}_soil_moisture_7_to_28cm")
 
     # Vérifier que toutes les colonnes existent
     available = set(df.columns) - {"timestamp"}

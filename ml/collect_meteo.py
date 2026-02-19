@@ -3,7 +3,7 @@
 Variables collectées :
 - precipitation (mm/h)
 - soil_moisture_0_to_7cm (m³/m³)
-- soil_moisture_0_to_28cm (m³/m³)
+- soil_moisture_7_to_28cm (m³/m³)
 
 Open-Meteo accepte des plages longues (plusieurs années) en une seule requête,
 mais on découpe en segments annuels pour fiabilité.
@@ -37,13 +37,13 @@ MAX_RETRIES = 3
 RETRY_DELAY = 5
 REQUEST_DELAY = 0.5  # Open-Meteo est généreux mais restons polis
 
-METEO_VARIABLES = ["precipitation", "soil_moisture_0_to_7cm", "soil_moisture_0_to_28cm"]
+METEO_VARIABLES = ["precipitation", "soil_moisture_0_to_7cm", "soil_moisture_7_to_28cm"]
 
 # Mapping variable → suffixe de fichier CSV
 CSV_SUFFIXES = {
     "precipitation": "precip",
     "soil_moisture_0_to_7cm": "soil_moisture_0_to_7cm",
-    "soil_moisture_0_to_28cm": "soil_moisture_0_to_28cm",
+    "soil_moisture_7_to_28cm": "soil_moisture_7_to_28cm",
 }
 
 
