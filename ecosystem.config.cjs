@@ -1,6 +1,6 @@
 module.exports = {
   apps: [{
-    name: 'vigicrue-api',
+    name: 'vilaine-amont-api',
     script: 'backend/src/index.js',
     env: {
       NODE_ENV: 'production',
